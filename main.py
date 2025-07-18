@@ -12,7 +12,7 @@ try:
     pygame.mixer.init()
     if os.path.exists("bgm.mp3"):
         pygame.mixer.music.load("bgm.mp3")
-        pygame.mixer.music.set_volume(0.01)  # Start at volume level 1/10
+        pygame.mixer.music.set_volume(0.001)  # Start at volume level 1/10
         pygame.mixer.music.play(-1)  # Loop forever
         BGM_ENABLED = True
     else:
@@ -47,7 +47,7 @@ PLAYER_SPEED = 5
 JUMP_HEIGHT = -22
 GRAVITY = 1
 
-LEVEL_END_X = 1100  # World width
+LEVEL_END_X = 2200  # Extended world width for larger first level
 
 COIN_WORLD_STATE = "COIN_WORLD"
 
@@ -56,14 +56,25 @@ class Player:
         self.rect = pygame.Rect(100, 100, PLAYER_SIZE, PLAYER_SIZE)
         self.vy = 0
         self.on_ground = False
+        self.invincible = False
+        self.invincible_timer = 0
+        self.speed_boost = False
+        self.speed_boost_timer = 0
+        self.coin_bonus = False
+        self.coin_bonus_timer = 0
+        self.jump_boost = False
+        self.jump_boost_timer = 0
 
     def move(self, platforms):
         keys = pygame.key.get_pressed()
         dx = 0
+        speed = PLAYER_SPEED
+        if self.speed_boost:
+            speed += 3
         if keys[pygame.K_LEFT]:
-            dx -= PLAYER_SPEED
+            dx -= speed
         if keys[pygame.K_RIGHT]:
-            dx += PLAYER_SPEED
+            dx += speed
 
         new_x = self.rect.x + dx
         if new_x < 0:
@@ -80,7 +91,10 @@ class Player:
                     self.rect.left = plat.rect.right
 
         if keys[pygame.K_SPACE] and self.on_ground:
-            self.vy = JUMP_HEIGHT
+            if self.jump_boost:
+                self.vy = JUMP_HEIGHT - 10
+            else:
+                self.vy = JUMP_HEIGHT
             self.on_ground = False
 
         self.vy += GRAVITY
@@ -105,6 +119,28 @@ class Player:
             self.rect.bottom = HEIGHT
             self.vy = 0
             self.on_ground = True
+
+        # Handle timers for boosts
+        if self.invincible_timer > 0:
+            self.invincible_timer -= 1
+            self.invincible = True
+            if self.invincible_timer == 0:
+                self.invincible = False
+        if self.speed_boost_timer > 0:
+            self.speed_boost_timer -= 1
+            self.speed_boost = True
+            if self.speed_boost_timer == 0:
+                self.speed_boost = False
+        if self.coin_bonus_timer > 0:
+            self.coin_bonus_timer -= 1
+            self.coin_bonus = True
+            if self.coin_bonus_timer == 0:
+                self.coin_bonus = False
+        if self.jump_boost_timer > 0:
+            self.jump_boost_timer -= 1
+            self.jump_boost = True
+            if self.jump_boost_timer == 0:
+                self.jump_boost = False
 
     def draw(self, surf, camera_x):
         pygame.draw.ellipse(surf, RED, (self.rect.x-camera_x, self.rect.y+10, self.rect.w, self.rect.h-10))
@@ -131,10 +167,103 @@ class Enemy:
             self.direction = -1
 
     def draw(self, surf, camera_x):
+        # Default enemy (we will override in subclasses)
         pygame.draw.ellipse(surf, BROWN, (self.rect.x-camera_x, self.rect.y, self.rect.w, self.rect.h//2+6))
         pygame.draw.ellipse(surf, SKIN, (self.rect.x+5-camera_x, self.rect.y+self.rect.h//2-4, self.rect.w-10, self.rect.h//2-2))
         pygame.draw.ellipse(surf, BLACK, (self.rect.x+13-camera_x, self.rect.y+15, 5,7))
         pygame.draw.ellipse(surf, BLACK, (self.rect.x+22-camera_x, self.rect.y+15, 5,7))
+
+class BookEnemy(Enemy):
+    def draw(self, surf, camera_x):
+        # Draw as a blue book with a face
+        pygame.draw.rect(surf, (120, 200, 230), (self.rect.x-camera_x, self.rect.y, self.rect.w, self.rect.h))
+        pygame.draw.line(surf, (230,230,255), (self.rect.x-camera_x+5, self.rect.y+5), (self.rect.x-camera_x+5, self.rect.y+self.rect.h-5), 3)
+        pygame.draw.rect(surf, (220,220,255), (self.rect.x-camera_x+5, self.rect.y+5, self.rect.w-10, self.rect.h-10), 2)
+        pygame.draw.ellipse(surf, BLACK, (self.rect.x+8-camera_x, self.rect.y+12, 5,7))
+        pygame.draw.ellipse(surf, BLACK, (self.rect.x+21-camera_x, self.rect.y+12, 5,7))
+        pygame.draw.arc(surf, BLACK, (self.rect.x+10-camera_x, self.rect.y+22, 13,5), 3.14, 0, 2)
+
+class BadmintonEnemy(Enemy):
+    def draw(self, surf, camera_x):
+        # Draw as a shuttlecock with angry face
+        pygame.draw.polygon(surf, (210,210,210), [
+            (self.rect.x-camera_x+17, self.rect.y),
+            (self.rect.x-camera_x+6, self.rect.y+26),
+            (self.rect.x-camera_x+28, self.rect.y+26)
+        ])
+        pygame.draw.ellipse(surf, (255,255,255), (self.rect.x-camera_x+6, self.rect.y+22, 22,12))
+        pygame.draw.ellipse(surf, BLACK, (self.rect.x+11-camera_x, self.rect.y+18, 3,4))
+        pygame.draw.ellipse(surf, BLACK, (self.rect.x+20-camera_x, self.rect.y+18, 3,4))
+        pygame.draw.arc(surf, BLACK, (self.rect.x+13-camera_x, self.rect.y+24, 7,4), 3.14, 0, 1)
+
+class ParentEnemy(Enemy):
+    def draw(self, surf, camera_x):
+        # Draw as stick-figure with a megaphone (speaker mouth)
+        pygame.draw.line(surf, BLACK, (self.rect.x-camera_x+17, self.rect.y+15), (self.rect.x-camera_x+17, self.rect.y+30), 3) # body
+        pygame.draw.circle(surf, (255,212,170), (self.rect.x-camera_x+17, self.rect.y+10), 8) # head
+        pygame.draw.line(surf, BLACK, (self.rect.x-camera_x+17, self.rect.y+25), (self.rect.x-camera_x+5, self.rect.y+20), 3) # left arm
+        pygame.draw.line(surf, BLACK, (self.rect.x-camera_x+17, self.rect.y+25), (self.rect.x-camera_x+30, self.rect.y+10), 3) # right arm (with megaphone)
+        pygame.draw.polygon(surf, (190,0,0), [
+            (self.rect.x-camera_x+31, self.rect.y+9), (self.rect.x-camera_x+39, self.rect.y+7), (self.rect.x-camera_x+37, self.rect.y+13)
+        ])
+        pygame.draw.arc(surf, BLACK, (self.rect.x+12-camera_x, self.rect.y+14, 10,5), 3.14, 0, 1)
+
+class Friend:
+    def __init__(self, x, y, kind="VideoGame"):
+        self.rect = pygame.Rect(x, y, 34, 34)
+        self.kind = kind
+        self.active = True
+
+    def draw(self, surf, camera_x):
+        if self.kind == "VideoGame":
+            # Draw a game controller
+            pygame.draw.ellipse(surf, (88,88,88), (self.rect.x-camera_x, self.rect.y+8, 34, 18))
+            pygame.draw.circle(surf, (220,34,44), (self.rect.x+13-camera_x, self.rect.y+17), 3)
+            pygame.draw.circle(surf, (45,89,220), (self.rect.x+21-camera_x, self.rect.y+17), 3)
+            pygame.draw.rect(surf, (40,40,40), (self.rect.x+12-camera_x, self.rect.y+13, 10,6), 1)
+        elif self.kind == "Lego":
+            # Draw a yellow lego brick
+            pygame.draw.rect(surf, (254,220,40), (self.rect.x-camera_x, self.rect.y+10, 34, 16))
+            for i in range(3):
+                pygame.draw.ellipse(surf, (255,255,140), (self.rect.x-camera_x+5+10*i, self.rect.y+6, 8,8))
+        elif self.kind == "Pizza":
+            # Pizza slice!
+            pygame.draw.polygon(surf, (230,180,30), [
+                (self.rect.x-camera_x+17, self.rect.y+4), (self.rect.x-camera_x+32, self.rect.y+30), (self.rect.x-camera_x+2, self.rect.y+30)
+            ])
+            pygame.draw.circle(surf, (255,70,70), (self.rect.x-camera_x+17, self.rect.y+21), 5)
+            pygame.draw.circle(surf, (234,200,100), (self.rect.x-camera_x+9, self.rect.y+19), 2)
+            pygame.draw.circle(surf, (234,200,100), (self.rect.x-camera_x+24, self.rect.y+27), 2)
+        else:
+            # Default: draw star
+            pygame.draw.polygon(surf, (255,223,65), [
+                (self.rect.x-camera_x+17, self.rect.y+3),
+                (self.rect.x-camera_x+22, self.rect.y+28),
+                (self.rect.x-camera_x+2, self.rect.y+12),
+                (self.rect.x-camera_x+32, self.rect.y+12),
+                (self.rect.x-camera_x+12, self.rect.y+28)
+            ])
+
+    def apply_power(self, player):
+        if self.kind == "VideoGame":
+            player.invincible = True
+            player.invincible_timer = 180
+        elif self.kind == "Soccer":
+            player.speed_boost = True
+            player.speed_boost_timer = 180
+        elif self.kind == "RSM Math":
+            player.coin_bonus = True
+            player.coin_bonus_timer = 180
+        elif self.kind == "Swimming":
+            player.jump_boost = True
+            player.jump_boost_timer = 180
+        elif self.kind == "Lego":
+            player.invincible = True
+            player.invincible_timer = 120
+        elif self.kind == "Pizza":
+            player.coin_bonus = True
+            player.coin_bonus_timer = 300
+        self.active = False
 
 class Platform:
     def __init__(self, x, y, w, h):
@@ -222,43 +351,104 @@ class Flag:
             (self.rect.x-camera_x+8, self.rect.y+47)
         ])
 
+def build_level(level):
+    import random
+    random.seed(level + random.randint(0, 1000000))
+    # Dynamic: mix up platforms, enemies, friends by level
+
+    # Vary platform layouts per level
+    plat_configs = [
+        # Level 0: mostly left; Level 1: mid+right; Level 2: mid crossings, etc
+        [
+            (0, HEIGHT - 50, LEVEL_END_X+100, 50),
+            (random.randint(300,380), 450, 120, 20),
+            (random.randint(500,720), 330, 120, 20),
+            (random.randint(800,1050), 210, 100, 20),
+            (random.randint(900,1400), random.randint(350,440), 180, 24),
+            (random.randint(1200,1600), random.randint(280,480), 160, 20),
+            (random.randint(1550,1800), random.randint(200,330), 120, 20),
+            (random.randint(1800,2000), random.randint(220,330), 100, 20),
+        ],
+        [
+            (0, HEIGHT - 50, LEVEL_END_X+100, 50),
+            (random.randint(150,350), random.randint(350, 500), 100, 20),
+            (random.randint(600,900), random.randint(250, 400), 120, 15),
+            (random.randint(950,1300), random.randint(190, 400), 100, 15),
+            (random.randint(1200,1600), random.randint(120, 300), 140, 18),
+            (random.randint(1700,2100), random.randint(150, 420), 160, 16),
+        ],
+        [
+            (0, HEIGHT - 50, LEVEL_END_X+100, 50),
+            (random.randint(200,400), 350, 120, 20),
+            (random.randint(700,1100), 260, 110, 18),
+            (random.randint(1200,1700), 200, 150, 22),
+            (random.randint(1600,2100), random.randint(150,350), 160, 20),
+        ]
+    ]
+    plat = plat_configs[level % len(plat_configs)]
+    platforms = [Platform(*p) for p in plat]
+
+    # Select different sets of enemy/friend types for each level
+    ENEMY_TYPES = [
+        [BookEnemy, BadmintonEnemy],
+        [ParentEnemy, BookEnemy],
+        [BadmintonEnemy, ParentEnemy]
+    ]
+    FRIEND_TYPES = [
+        ["VideoGame", "Soccer", "Lego"],
+        ["Swimming", "Pizza", "RSM Math"],
+        ["Pizza", "Lego", "Soccer"]
+    ]
+    etypes = ENEMY_TYPES[level % len(ENEMY_TYPES)]
+    ftypes = FRIEND_TYPES[level % len(FRIEND_TYPES)]
+
+    # Place enemies/friends, random positions on platforms, no repeats
+    enemies = []
+    friends = []
+    placed_enemy_pos = set()
+    placed_friend_pos = set()
+    # Enemies: per platform (except ground), one or two per plat, random x
+    for idx, plat in enumerate(platforms[1:]):
+        n = random.randint(1, 2)
+        for _ in range(n):
+            ex = plat.rect.x + random.randint(0, plat.rect.w-34)
+            if (ex, plat.rect.y-34) not in placed_enemy_pos:
+                eclass = random.choice(etypes)
+                enemies.append(eclass(ex, plat.rect.y-34, plat.rect))
+                placed_enemy_pos.add((ex, plat.rect.y-34))
+    # Friends: a few per level, at different places
+    for plat in random.sample(platforms[1:], min(3, len(platforms)-1)):
+        fx = plat.rect.x + random.randint(0, plat.rect.w-34)
+        kind = random.choice(ftypes)
+        if (fx, plat.rect.y-34) not in placed_friend_pos:
+            friends.append(Friend(fx, plat.rect.y-34, kind))
+            placed_friend_pos.add((fx, plat.rect.y-34))
+    # Coins: per level, random on platforms
+    coins = []
+    for plat in platforms[1:]:
+        for _ in range(random.randint(1, 3)):
+            cx = plat.rect.x + random.randint(0, plat.rect.w-20)
+            cy = plat.rect.y - random.randint(10, 30)
+            coins.append(Coin(cx, cy))
+    # Pipes: a few at diverse locations
+    pipes = [Pipe(random.randint(100, LEVEL_END_X-100), HEIGHT-120, 60, 70) for _ in range(3)]
+    flag = Flag(LEVEL_END_X+35, HEIGHT-50)
+    mom = Mom(random.randint(680, 1600), HEIGHT-110)
+    slippers = []
+    return platforms, enemies, friends, coins, pipes, flag, mom, slippers
+
 def main():
     screen = pygame.display.set_mode((WIDTH, HEIGHT))
     clock = pygame.time.Clock()
+    current_level = 0
+    max_level = 2
 
-    platforms = [
-        Platform(0, HEIGHT - 50, LEVEL_END_X+100, 50),
-        Platform(300, 450, 120, 20),
-        Platform(480, 330, 120, 20),
-        Platform(640, 210, 100, 20),
-        Platform(900, 400, 180, 24)
-    ]
+    # Init all level-scoped variables at main scope
+    platforms, enemies, friends, coins, pipes, flag, mom, slippers = build_level(current_level)
 
-    enemies = [
-        Enemy(320, 450-34, platforms[1].rect),
-        Enemy(500, 330-34, platforms[2].rect),
-        Enemy(650, 210-34, platforms[3].rect),
-        Enemy(950, 400-34, platforms[4].rect)
-    ]
-
-    coins = [
-        Coin(350, 430), Coin(500, 310), Coin(700, 190),
-        Coin(950, 380), Coin(1020, 380)
-    ]
-
-    pipes = [
-        Pipe(170, HEIGHT-120, 60, 70),     
-        Pipe(570, HEIGHT-120, 60, 70),     
-        Pipe(980, HEIGHT-120, 60, 70)      
-    ]
-
-    flag = Flag(LEVEL_END_X+35, HEIGHT-50)
-    mom = Mom(700, HEIGHT-110)
-    slippers = []
-
-    coinworld_entry_pipe = None  # The main world pipe used for entry
-    coinworld_exit_pipe = None   # The coin world’s exit pipe object
-    last_mainworld_pos = None    # Store player position before entering coinworld
+    coinworld_entry_pipe = None
+    coinworld_exit_pipe = None
+    last_mainworld_pos = None
 
     def enter_coin_world(from_pipe):
         nonlocal state, coinworld_entry_pipe, coinworld_exit_pipe
@@ -401,40 +591,40 @@ def main():
             screen.fill(BLACK)
             msg = pygame.font.Font(None, 64).render("Level Complete!", True, YELLOW)
             score_display = pygame.font.Font(None, 36).render(f"Final Score: {score}", True, GOLDEN)
-            prompt = pygame.font.Font(None, 36).render("Press SPACE to Restart", True, WHITE)
-            screen.blit(msg, ((WIDTH-msg.get_width())//2, HEIGHT//2-70))
-            screen.blit(score_display, ((WIDTH-score_display.get_width())//2, HEIGHT//2))
-            screen.blit(prompt, ((WIDTH-prompt.get_width())//2, HEIGHT//2+50))
+            prompt_next = pygame.font.Font(None, 36).render("Press ENTER for Next Level", True, WHITE)
+            prompt_restart = pygame.font.Font(None, 28).render("Press SPACE to Restart Current Level", True, WHITE)
+            screen.blit(msg, ((WIDTH-msg.get_width())//2, HEIGHT//2-90))
+            screen.blit(score_display, ((WIDTH-score_display.get_width())//2, HEIGHT//2-24))
+            screen.blit(prompt_next, ((WIDTH-prompt_next.get_width())//2, HEIGHT//2+40))
+            screen.blit(prompt_restart, ((WIDTH-prompt_restart.get_width())//2, HEIGHT//2+90))
             pygame.display.flip()
-            if keys[pygame.K_SPACE]:
+            if keys[pygame.K_RETURN]:
+                if current_level + 1 < max_level:
+                    current_level += 1
+                else:
+                    current_level = 0
                 player.__init__()
-                enemies[:] = [
-                    Enemy(320, 450-34, platforms[1].rect),
-                    Enemy(500, 330-34, platforms[2].rect),
-                    Enemy(650, 210-34, platforms[3].rect),
-                    Enemy(950, 400-34, platforms[4].rect)
-                ]
-                coins[:] = [
-                    Coin(350, 430), Coin(500, 310), Coin(700, 190),
-                    Coin(950, 380), Coin(1020, 380)
-                ]
-                slippers.clear()
-                mom.throw_timer = 0
-                mom.shout_frames = 0
+                platforms, enemies, friends, coins, pipes, flag, mom, slippers = build_level(current_level)
                 state = "PLAY"
-                score = 0
+            elif keys[pygame.K_SPACE]:
+                player.__init__()
+                platforms, enemies, friends, coins, pipes, flag, mom, slippers = build_level(current_level)
+                state = "PLAY"
             clock.tick(FPS)
             continue
-
         # --- Game Play ---
         player.move(platforms)
         stomped = False
         remove_enemies = []
+
         for enemy in enemies:
             enemy.move(platforms)
         for i,enemy in enumerate(enemies):
             if player.rect.colliderect(enemy.rect):
-                if player.vy > 0 and player.rect.bottom - enemy.rect.top < 24 and player.rect.top < enemy.rect.top:
+                if player.invincible:
+                    remove_enemies.append(i)
+                    score += 100
+                elif player.vy > 0 and player.rect.bottom - enemy.rect.top < 24 and player.rect.top < enemy.rect.top:
                     remove_enemies.append(i)
                     player.vy = JUMP_HEIGHT // 2
                     stomped = True
@@ -444,10 +634,16 @@ def main():
                     break
         for idx in sorted(remove_enemies, reverse=True):
             del enemies[idx]
+        for friend in friends:
+            if friend.active and player.rect.colliderect(friend.rect):
+                friend.apply_power(player)
         for coin in coins[:]:
             if player.rect.colliderect(coin.rect):
                 coins.remove(coin)
-                score += 1
+                if player.coin_bonus:
+                    score += 2
+                else:
+                    score += 1
         for pipe in pipes:
             if player.rect.colliderect(pipe.rect):
                 if player.rect.bottom > pipe.rect.top and player.vy >= 0:
@@ -458,7 +654,7 @@ def main():
                     if keys[pygame.K_DOWN] and player.rect.bottom == pipe.rect.top:
                         enter_coin_world(pipe)  # Call your coinworld function
 
-        # Mom throwing slippers in all directions
+        # Mom throwing slippers in all directions (enemy)
         if mom.update():
             angle = random.uniform(-1.4, 1.4)
             speed = random.randint(8,13)
@@ -470,7 +666,8 @@ def main():
         for slipper in slippers[:]:
             slipper.move()
             if player.rect.colliderect(slipper.rect):
-                state = "GAMEOVER"
+                if not player.invincible:
+                    state = "GAMEOVER"
             if (slipper.rect.right < 0 or slipper.rect.left > LEVEL_END_X+200 or
                 slipper.rect.top > HEIGHT or slipper.rect.bottom < 0):
                 slippers.remove(slipper)
@@ -492,6 +689,9 @@ def main():
             pipe.draw(screen, camera_x)
         for enemy in enemies:
             enemy.draw(screen, camera_x)
+        for friend in friends:
+            if friend.active:
+                friend.draw(screen, camera_x)
         for coin in coins:
             coin.draw(screen, camera_x)
         mom.draw(screen, camera_x)
