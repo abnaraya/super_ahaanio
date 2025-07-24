@@ -47,7 +47,7 @@ PLAYER_SPEED = 5
 JUMP_HEIGHT = -22
 GRAVITY = 1
 
-LEVEL_END_X = 2200  # Extended world width for larger first level
+LEVEL_END_X = 3000  # Extended world width for longer and more challenging levels
 
 COIN_WORLD_STATE = "COIN_WORLD"
 
@@ -234,6 +234,31 @@ class Friend:
             pygame.draw.circle(surf, (255,70,70), (self.rect.x-camera_x+17, self.rect.y+21), 5)
             pygame.draw.circle(surf, (234,200,100), (self.rect.x-camera_x+9, self.rect.y+19), 2)
             pygame.draw.circle(surf, (234,200,100), (self.rect.x-camera_x+24, self.rect.y+27), 2)
+        elif self.kind == "Drums":
+            # Draw drums: two circles (drums) and sticks
+            pygame.draw.circle(surf, (190, 90, 8), (self.rect.x+14-camera_x, self.rect.y+25), 9)
+            pygame.draw.circle(surf, (100,100,100), (self.rect.x+28-camera_x, self.rect.y+25), 7)
+            pygame.draw.line(surf, (255,229,180), (self.rect.x+19-camera_x, self.rect.y+16), (self.rect.x+21-camera_x, self.rect.y+7), 3)
+            pygame.draw.line(surf, (255,229,180), (self.rect.x+23-camera_x, self.rect.y+19), (self.rect.x+30-camera_x, self.rect.y+8), 3)
+        elif self.kind == "SoccerBall":
+            # Draw soccer ball - white circle with black patches
+            pygame.draw.circle(surf, (230,230,230), (self.rect.x+17-camera_x, self.rect.y+17), 16)
+            pygame.draw.polygon(surf, (10,10,10), [
+                (self.rect.x+14-camera_x, self.rect.y+11), (self.rect.x+22-camera_x, self.rect.y+11), (self.rect.x+18-camera_x, self.rect.y+18)
+            ])
+            pygame.draw.circle(surf, (10,10,10), (self.rect.x+18-camera_x, self.rect.y+23), 3)
+        elif self.kind == "RipStick":
+            # Draw a ripstick (long black oval with colored wheels)
+            pygame.draw.ellipse(surf, (20,20,20), (self.rect.x+5-camera_x, self.rect.y+10, 24, 7))
+            pygame.draw.circle(surf, (180,0,180), (self.rect.x+8-camera_x, self.rect.y+14), 3)
+            pygame.draw.circle(surf, (32,200,200), (self.rect.x+29-camera_x, self.rect.y+14), 3)
+        elif self.kind == "Bike":
+            # Draw a simple bike: two wheels and frame
+            pygame.draw.circle(surf, (60,60,60), (self.rect.x+10-camera_x, self.rect.y+26), 6)
+            pygame.draw.circle(surf, (60,60,60), (self.rect.x+28-camera_x, self.rect.y+26), 6)
+            pygame.draw.line(surf, (10,110,210), (self.rect.x+10-camera_x, self.rect.y+26), (self.rect.x+19-camera_x, self.rect.y+17), 2)
+            pygame.draw.line(surf, (200,40,10), (self.rect.x+28-camera_x, self.rect.y+26), (self.rect.x+19-camera_x, self.rect.y+17), 2)
+            pygame.draw.line(surf, (80,200,80), (self.rect.x+19-camera_x, self.rect.y+17), (self.rect.x+19-camera_x, self.rect.y+22), 2)
         else:
             # Default: draw star
             pygame.draw.polygon(surf, (255,223,65), [
@@ -245,10 +270,11 @@ class Friend:
             ])
 
     def apply_power(self, player):
+        # Assign power-ups for new friends
         if self.kind == "VideoGame":
             player.invincible = True
             player.invincible_timer = 180
-        elif self.kind == "Soccer":
+        elif self.kind == "Soccer" or self.kind == "SoccerBall":
             player.speed_boost = True
             player.speed_boost_timer = 180
         elif self.kind == "RSM Math":
@@ -263,6 +289,15 @@ class Friend:
         elif self.kind == "Pizza":
             player.coin_bonus = True
             player.coin_bonus_timer = 300
+        elif self.kind == "Drums":
+            player.invincible = True
+            player.invincible_timer = 100
+        elif self.kind == "RipStick":
+            player.speed_boost = True
+            player.speed_boost_timer = 220
+        elif self.kind == "Bike":
+            player.speed_boost = True
+            player.speed_boost_timer = 240
         self.active = False
 
 class Platform:
@@ -389,40 +424,68 @@ def build_level(level):
     platforms = [Platform(*p) for p in plat]
 
     # Select different sets of enemy/friend types for each level
+    # More expressive enemy and friend types reflecting Ahaan's likes and dislikes
     ENEMY_TYPES = [
-        [BookEnemy, BadmintonEnemy],
-        [ParentEnemy, BookEnemy],
-        [BadmintonEnemy, ParentEnemy]
+        # Level 0: Homework, Chore (BookEnemy, ParentEnemy), Shower (BadmintonEnemy)
+        [BookEnemy, ParentEnemy, BadmintonEnemy],
+        # Level 1: CleanRoom (BookEnemy), NaggingParent (ParentEnemy), BadmintonClass (BadmintonEnemy)
+        [BookEnemy, ParentEnemy, BadmintonEnemy],
+        # Level 2: ForcedFood (BookEnemy), BadHabitParent (ParentEnemy), MoreChores (BadmintonEnemy)
+        [BookEnemy, ParentEnemy, BadmintonEnemy]
     ]
     FRIEND_TYPES = [
-        ["VideoGame", "Soccer", "Lego"],
-        ["Swimming", "Pizza", "RSM Math"],
-        ["Pizza", "Lego", "Soccer"]
+        # Level 0: Gadgets, Sports, Family, New: Drums, SoccerBall, RipStick, Bike
+        ["VideoGame", "Soccer", "SoccerBall", "Pizza", "Lego", "Drums", "RipStick", "Bike"],
+        # Level 1: Music, Restaurant, Chess/Carrom, Drums, RipStick, Bike
+        ["Swimming", "Pizza", "RSM Math", "Lego", "Drums", "RipStick", "Bike"],
+        # Level 2: "Drums", "RockBand", "Bike", "Pizza", "SoccerBall", "RipStick"
+        ["Pizza", "Lego", "Soccer", "SoccerBall", "VideoGame", "Swimming", "Drums", "RipStick", "Bike"]
     ]
     etypes = ENEMY_TYPES[level % len(ENEMY_TYPES)]
     ftypes = FRIEND_TYPES[level % len(FRIEND_TYPES)]
 
-    # Place enemies/friends, random positions on platforms, no repeats
+    # Place enemies: different types and arrangements per level for variety and complexity
     enemies = []
     friends = []
     placed_enemy_pos = set()
     placed_friend_pos = set()
-    # Enemies: per platform (except ground), one or two per plat, random x
+    level = level % len(ENEMY_TYPES)
+    # Enemies become more complex and numerous each level
     for idx, plat in enumerate(platforms[1:]):
-        n = random.randint(1, 2)
+        n = 1 + (level >= 1) + random.randint(0, level)  # more enemies in higher levels
+        enemy_types_this_level = etypes[:2 + (level > 0)]
         for _ in range(n):
             ex = plat.rect.x + random.randint(0, plat.rect.w-34)
             if (ex, plat.rect.y-34) not in placed_enemy_pos:
-                eclass = random.choice(etypes)
+                eclass = random.choice(enemy_types_this_level)
                 enemies.append(eclass(ex, plat.rect.y-34, plat.rect))
                 placed_enemy_pos.add((ex, plat.rect.y-34))
-    # Friends: a few per level, at different places
-    for plat in random.sample(platforms[1:], min(3, len(platforms)-1)):
+    # Friends: distribute "likes" based on level theme, increasing support in later levels
+    friendly_spots = random.sample(platforms[1:], min(4+level, len(platforms)-1))
+    for plat in friendly_spots:
         fx = plat.rect.x + random.randint(0, plat.rect.w-34)
         kind = random.choice(ftypes)
         if (fx, plat.rect.y-34) not in placed_friend_pos:
             friends.append(Friend(fx, plat.rect.y-34, kind))
             placed_friend_pos.add((fx, plat.rect.y-34))
+    # GUARANTEED: always place one Drums and one SoccerBall friend in every level
+    drums_placed = any(f.kind == "Drums" for f in friends)
+    soccerball_placed = any(f.kind == "SoccerBall" for f in friends)
+    extra_platforms = platforms[1:]
+    if not drums_placed and extra_platforms:
+        plat = random.choice(extra_platforms)
+        fx = plat.rect.centerx
+        fy = plat.rect.y-34
+        if (fx, fy) not in placed_friend_pos:
+            friends.append(Friend(fx, fy, "Drums"))
+            placed_friend_pos.add((fx, fy))
+    if not soccerball_placed and extra_platforms:
+        plat = random.choice(extra_platforms)
+        fx = plat.rect.centerx + 10
+        fy = plat.rect.y-34
+        if (fx, fy) not in placed_friend_pos:
+            friends.append(Friend(fx, fy, "SoccerBall"))
+            placed_friend_pos.add((fx, fy))
     # Coins: per level, random on platforms
     coins = []
     for plat in platforms[1:]:
@@ -437,11 +500,28 @@ def build_level(level):
     slippers = []
     return platforms, enemies, friends, coins, pipes, flag, mom, slippers
 
+def draw_volume_overlay(screen, volume_level):
+    """Draws the on-screen volume overlay."""
+    font = pygame.font.Font(None, 36)
+    overlay = font.render(f'Volume: {volume_level}/10', True, (255,255,255), (0, 0, 0, 140))
+    screen.blit(overlay, (WIDTH - overlay.get_width() - 40, HEIGHT - 50))
+
 def main():
     screen = pygame.display.set_mode((WIDTH, HEIGHT))
     clock = pygame.time.Clock()
     current_level = 0
     max_level = 2
+
+    # STORY PAGES as list of strings
+    story_pages = [
+        "In the world of Super Ahaanio, a cheerful boy named Ahaan explores a world filled with awesome friends and mischievous foes.",
+        "Ahaan LOVES gadgets: Nintendo Switch, PS5, Apple Watch, Laptops. He jams on his drums and performs with his rock band.",
+        "He is an energetic sportsman: playing soccer, swimming, basketball, ping-pong, tennis, riding skateboards and rip-sticks, cycling, and more! He enjoys chess and carrom with family, and feasts on his favorite Mediterranean and Italian food.",
+        "But he also faces many challenges: endless homework, chores, parents asking him to study, cleaning his room, forced badminton and showers, and parents yelling like villains!",
+        "On this journey, you help Ahaan collect power-ups (gadgets, music, food, family time) and avoid pesky foes (homework, chores, nagging) as he adventures toward happiness.",
+        "Are you ready to join Ahaan on his adventure? Press SPACE to begin! (Press S anytime to SKIP STORY)"
+    ]
+    story_page = 0
 
     # Init all level-scoped variables at main scope
     platforms, enemies, friends, coins, pipes, flag, mom, slippers = build_level(current_level)
@@ -501,19 +581,97 @@ def main():
     coinworld_enemies = []
     coinworld_exit_pipe = None
 
+    # For story flow handling
+    in_story = False
+
     while running:
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
                 running = False
         keys = pygame.key.get_pressed()
+
+        # --- Handle Global Volume Keys ---
+  # Volume keys: +, =, PageUp to raise; -, _, PageDown to lower
+        vkey = False
+        if (keys[pygame.K_PLUS] or keys[pygame.K_EQUALS]):
+            # Raise volume
+            if volume_level < 10:
+                volume_level += 1
+                vkey = True
+        if (keys[pygame.K_MINUS] or keys[pygame.K_UNDERSCORE]):
+            if volume_level > 0:
+                volume_level -= 1
+                vkey = True
+        if vkey and BGM_ENABLED:
+            pygame.mixer.music.set_volume(volume_level / 10.0)
+            volume_display_timer = FPS * 2  # show overlay for 2 seconds
+
         if state == "START":
             screen.fill(BLACK)
             title = pygame.font.Font(None, 64).render("Super Ahaanio", True, YELLOW)
             prompt = pygame.font.Font(None, 36).render("Press SPACE to Start", True, WHITE)
+            story_prompt = pygame.font.Font(None, 28).render("Press ENTER for Story", True, (180,180,255))
             screen.blit(title, ((WIDTH-title.get_width())//2, HEIGHT//2-70))
             screen.blit(prompt, ((WIDTH-prompt.get_width())//2, HEIGHT//2))
+            screen.blit(story_prompt, ((WIDTH-story_prompt.get_width())//2, HEIGHT//2+60))
+            if volume_display_timer > 0:
+                draw_volume_overlay(screen, volume_level)
+                volume_display_timer -= 1
             pygame.display.flip()
+            if keys[pygame.K_RETURN]:
+                state = "STORY"
+                story_page = 0
+            elif keys[pygame.K_SPACE]:
+                state = "PLAY"
+            clock.tick(FPS)
+            continue
+        if state == "STORY":
+            # Wrap text for the story, and ensure neat adaptive placement
+            def render_multiline(text, font, color, pos_y, max_width):
+                words = text.replace("\n", " \n ").split(' ')
+                lines = []
+                line = ""
+                for word in words:
+                    future = line + word + " "
+                    if word == "\n":
+                        lines.append(line)
+                        line = ""
+                    elif font.size(future)[0] > max_width:
+                        lines.append(line)
+                        line = word + " "
+                    else:
+                        line = future
+                if line:
+                    lines.append(line)
+                for idx, l in enumerate(lines):
+                    rend = font.render(l.strip(), True, color)
+                    screen.blit(rend, (60, pos_y + idx * (font.get_height() + 3)))
+
+            screen.fill((40,32,60))
+            font = pygame.font.Font(None, 34)
+            # Adaptive width, about 80% of WIDTH
+            page_text = story_pages[story_page]
+            color = YELLOW if story_page != len(story_pages)-1 else (255,255,255)
+            render_multiline(page_text, font, color, 100, int(WIDTH * 0.8))
+            skip = pygame.font.Font(None, 24).render("Press S to skip story", True, WHITE)
+            screen.blit(skip, (WIDTH-240, HEIGHT-34))
+            if volume_display_timer > 0:
+                draw_volume_overlay(screen, volume_level)
+                volume_display_timer -= 1
+            pygame.display.flip()
+            # Debounce space key: advance only on new press
+            if not hasattr(main, 'story_last_space'):
+                main.story_last_space = False
             if keys[pygame.K_SPACE]:
+                if not main.story_last_space:
+                    if story_page < len(story_pages)-1:
+                        story_page += 1
+                    else:
+                        state = "PLAY"
+                main.story_last_space = True
+            else:
+                main.story_last_space = False
+            if keys[pygame.K_s]:
                 state = "PLAY"
             clock.tick(FPS)
             continue
@@ -543,6 +701,9 @@ def main():
                 mom.shout_frames = 0
                 state = "PLAY"
                 score = 0
+            if volume_display_timer > 0:
+                draw_volume_overlay(screen, volume_level)
+                volume_display_timer -= 1
             clock.tick(FPS)
             continue
         if state == COIN_WORLD_STATE:
@@ -585,6 +746,15 @@ def main():
             screen.blit(exit_label, (coinworld_exit_pipe.rect.x + 10, coinworld_exit_pipe.rect.y - 25))
         
             pygame.display.flip()
+            if volume_display_timer > 0:
+                draw_volume_overlay(screen, volume_level)
+                volume_display_timer -= 1
+            clock.tick(FPS)
+            continue
+            pygame.display.flip()
+            if volume_display_timer > 0:
+                draw_volume_overlay(screen, volume_level)
+                volume_display_timer -= 1
             clock.tick(FPS)
             continue
         if state == "COMPLETE":
@@ -703,6 +873,9 @@ def main():
         font = pygame.font.Font(None, 36)
         text = font.render(f'Score: {score}', True, BLACK)
         screen.blit(text, (10, 10))
+        if volume_display_timer > 0:
+            draw_volume_overlay(screen, volume_level)
+            volume_display_timer -= 1
         pygame.display.flip()
         clock.tick(FPS)
 
