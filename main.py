@@ -38,28 +38,54 @@ GRAVITY = 1
 
 LEVEL_END_X = 2000  # Extended world width for longer and more challenging levels
 
-# Sound effects (using pygame's built-in sound generation)
+# Sound effects (using NumPy for high-quality sound generation)
 def create_sound_effect(frequency, duration, volume=0.5):
-    """Create a simple sound effect"""
+    """Create a high-quality sound effect using NumPy"""
     if not MUSIC_AVAILABLE:
         return None
     try:
+        import numpy as np
+        import pygame.sndarray
+        
         sample_rate = 22050
         frames = int(duration * sample_rate)
-        arr = []
-        for i in range(frames):
-            wave = 4096 * volume * (i / frames) * (1 - i / frames)  # Envelope
-            wave *= (1 if int(2 * frequency * i / sample_rate) % 2 else -1)  # Square wave
-            arr.append([int(wave), int(wave)])
-        sound = pygame.sndarray.make_sound(pygame.array.array('i', arr))
+        
+        # Create time array
+        t = np.linspace(0, duration, frames, False)
+        
+        # Generate waveform - using a mix of sine and square for more interesting sounds
+        fundamental = np.sin(2 * np.pi * frequency * t)
+        harmonics = 0.3 * np.sin(2 * np.pi * frequency * 2 * t)  # Second harmonic
+        square_component = 0.2 * np.sign(np.sin(2 * np.pi * frequency * t))  # Square wave component
+        
+        wave = fundamental + harmonics + square_component
+        
+        # Apply envelope (exponential decay for more realistic sound)
+        envelope = np.exp(-t * 4)  # Exponential decay
+        wave = wave * envelope * volume
+        
+        # Normalize and convert to 16-bit range
+        wave = np.clip(wave, -1.0, 1.0)
+        wave = (wave * 32767).astype(np.int16)
+        
+        # Convert to stereo
+        stereo_wave = np.column_stack((wave, wave))
+        
+        sound = pygame.sndarray.make_sound(stereo_wave)
         return sound
-    except:
+        
+    except ImportError as e:
+        print(f"Could not import required modules for sound: {e}")
+        return None
+    except Exception as e:
+        print(f"Could not create sound effect: {e}")
         return None
 
-# Create sound effects
-JUMP_SOUND = create_sound_effect(800, 0.1, 0.3)
+# Create sound effects with better parameters
+JUMP_SOUND = create_sound_effect(600, 0.15, 0.4)  # Higher pitch, longer duration
 COIN_SOUND = create_sound_effect(1200, 0.15, 0.4)
-ENEMY_DEFEAT_SOUND = create_sound_effect(400, 0.2, 0.3)
+ENEMY_DEFEAT_SOUND = create_sound_effect(300, 0.3, 0.4)  # Lower pitch, longer duration
+STOMP_SOUND = create_sound_effect(200, 0.2, 0.5)  # Deep stomp sound
 BOSS_HIT_SOUND = create_sound_effect(600, 0.3, 0.5)
 GAME_OVER_SOUND = create_sound_effect(200, 0.5, 0.4)
 LEVEL_COMPLETE_SOUND = create_sound_effect(1000, 0.4, 0.5)
@@ -68,16 +94,35 @@ def play_sound(sound):
     """Play a sound effect if available"""
     if sound and MUSIC_AVAILABLE:
         try:
-            sound.play()
-        except:
-            pass
+            if hasattr(sound, 'play'):
+                sound.play()
+            else:
+                print("♪ Sound effect (no play method)")
+        except Exception as e:
+            print(f"Could not play sound: {e}")
+    elif sound:
+        # Handle fallback sound descriptions if they exist
+        if isinstance(sound, dict) and sound.get('type') == 'sound_effect':
+            freq = sound['frequency']
+            if freq >= 1000:
+                print("♪ *DING*")
+            elif freq >= 500:
+                print("♪ *BOING*")
+            elif freq >= 300:
+                print("♪ *THUMP*")
+            else:
+                print("♪ *BOOM*")
+        else:
+            print("♪ Sound effect played (fallback)")
+    else:
+        print("♪ No sound to play")
 
 def start_background_music():
     """Start playing background music"""
     if MUSIC_AVAILABLE:
         try:
             pygame.mixer.music.play(-1, 0.0)  # Loop indefinitely
-            pygame.mixer.music.set_volume(0.3)  # Set volume to 30%
+            pygame.mixer.music.set_volume(0.15)  # Reduced from 0.3 to 0.15 (50% quieter)
         except:
             pass
 
@@ -1236,7 +1281,7 @@ def main():
     boss = None
     mom = None
     music_playing = False
-    music_volume = 0.3
+    music_volume = 0.15  # Reduced default volume from 0.3
     
     # Secret world state
     in_secret_world = False
@@ -1409,12 +1454,12 @@ def main():
                     platforms, enemies, coins, pipes, flag, powerups, boss = create_boss_level(boss_level)
                     mom = None  # No mom in boss levels
                     # Lower music volume for boss fights to hear sound effects better
-                    set_music_volume(0.15)
+                    set_music_volume(0.08)  # Even quieter for boss fights
                 else:
                     boss = None
                     platforms, enemies, coins, pipes, flag, powerups, mom = create_normal_level(current_level)
                     # Normal volume for regular levels
-                    set_music_volume(0.3)
+                    set_music_volume(0.15)  # Reduced from 0.3
                 
                 state = "PLAY"
             clock.tick(FPS)
@@ -1432,8 +1477,8 @@ def main():
             if music_volume > 0:
                 set_music_volume(0)
             else:
-                set_music_volume(0.3)
-                music_volume = 0.3
+                set_music_volume(0.15)  # Restore to new default volume
+                music_volume = 0.15
         
         player.move(platforms)
         
@@ -1496,7 +1541,7 @@ def main():
                     player.vy = JUMP_HEIGHT // 2
                     stomped = True
                     score += 100
-                    play_sound(ENEMY_DEFEAT_SOUND)
+                    play_sound(STOMP_SOUND)  # Use the satisfying stomp sound
                 else:
                     # Player was killed by enemy
                     if player.die():  # Returns True if game over
