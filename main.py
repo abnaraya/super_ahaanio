@@ -1,26 +1,18 @@
 import pygame
 import sys
-import random
+import numpy as np
 
 # Initialize Pygame
 pygame.init()
-# --- Super Ahaanio BGM Setup ---
-# To use background music, place a Mario-like theme mp3/ogg as "bgm.mp3" in this directory.
-import os
+pygame.mixer.init()
+
+# Load music files
 try:
-    import pygame.mixer
-    pygame.mixer.init()
-    if os.path.exists("bgm.mp3"):
-        pygame.mixer.music.load("bgm.mp3")
-        pygame.mixer.music.set_volume(0.001)  # Start at volume level 1/10
-        pygame.mixer.music.play(-1)  # Loop forever
-        BGM_ENABLED = True
-    else:
-        print("bgm.mp3 not found. Game runs silently. (Add a background music file for music!)")
-        BGM_ENABLED = False
-except Exception as e:
-    print("Could not initialize background music:", e)
-    BGM_ENABLED = False
+    pygame.mixer.music.load("bgm.mp3")
+    MUSIC_AVAILABLE = True
+except pygame.error:
+    print("Music file not found, continuing without music")
+    MUSIC_AVAILABLE = False
 
 # Constants
 WIDTH, HEIGHT = 800, 600
@@ -33,9 +25,6 @@ RED = (220, 55, 70)
 SKIN = (255, 225, 175)
 BLUE = (0, 122, 255)
 BROWN = (140, 100, 50)
-SLIPPER_BASE = (185, 147, 93)
-SLIPPER_STRAP = (28, 60, 130)
-MOM_SAREE = (221, 44, 112)
 GREEN = (34, 177, 76)
 PIPE_GREEN = (0, 140, 51)
 YELLOW = (255, 222, 80)
@@ -47,35 +36,327 @@ PLAYER_SPEED = 5
 JUMP_HEIGHT = -22
 GRAVITY = 1
 
-LEVEL_END_X = 3000  # Extended world width for longer and more challenging levels
+LEVEL_END_X = 2000  # Extended world width for longer and more challenging levels
 
-COIN_WORLD_STATE = "COIN_WORLD"
+# Sound effects (using pygame's built-in sound generation)
+def create_sound_effect(frequency, duration, volume=0.5):
+    """Create a simple sound effect"""
+    if not MUSIC_AVAILABLE:
+        return None
+    try:
+        sample_rate = 22050
+        frames = int(duration * sample_rate)
+        arr = []
+        for i in range(frames):
+            wave = 4096 * volume * (i / frames) * (1 - i / frames)  # Envelope
+            wave *= (1 if int(2 * frequency * i / sample_rate) % 2 else -1)  # Square wave
+            arr.append([int(wave), int(wave)])
+        sound = pygame.sndarray.make_sound(pygame.array.array('i', arr))
+        return sound
+    except:
+        return None
+
+# Create sound effects
+JUMP_SOUND = create_sound_effect(800, 0.1, 0.3)
+COIN_SOUND = create_sound_effect(1200, 0.15, 0.4)
+ENEMY_DEFEAT_SOUND = create_sound_effect(400, 0.2, 0.3)
+BOSS_HIT_SOUND = create_sound_effect(600, 0.3, 0.5)
+GAME_OVER_SOUND = create_sound_effect(200, 0.5, 0.4)
+LEVEL_COMPLETE_SOUND = create_sound_effect(1000, 0.4, 0.5)
+
+def play_sound(sound):
+    """Play a sound effect if available"""
+    if sound and MUSIC_AVAILABLE:
+        try:
+            sound.play()
+        except:
+            pass
+
+def start_background_music():
+    """Start playing background music"""
+    if MUSIC_AVAILABLE:
+        try:
+            pygame.mixer.music.play(-1, 0.0)  # Loop indefinitely
+            pygame.mixer.music.set_volume(0.3)  # Set volume to 30%
+        except:
+            pass
+
+def stop_background_music():
+    """Stop background music"""
+    if MUSIC_AVAILABLE:
+        try:
+            pygame.mixer.music.stop()
+        except:
+            pass
+
+def set_music_volume(volume):
+    """Set music volume (0.0 to 1.0)"""
+    if MUSIC_AVAILABLE:
+        try:
+            pygame.mixer.music.set_volume(volume)
+        except:
+            pass
+
+class Slipper:
+    def __init__(self, x, y, target_x=None, target_y=None, speed=6):
+        self.rect = pygame.Rect(x, y, 20, 15)
+        self.speed = speed
+        if target_x is not None and target_y is not None:
+            # Calculate direction towards target
+            dx = target_x - x
+            dy = target_y - y
+            length = (dx**2 + dy**2)**0.5
+            if length > 0:
+                self.vx = (dx / length) * speed
+                self.vy = (dy / length) * speed
+            else:
+                self.vx = speed
+                self.vy = 0
+        else:
+            # Random direction for stage 1
+            import random
+            angle = random.uniform(0, 2 * 3.14159)
+            self.vx = speed * pygame.math.Vector2(1, 0).rotate_rad(angle).x
+            self.vy = speed * pygame.math.Vector2(1, 0).rotate_rad(angle).y
+
+    def update(self):
+        self.rect.x += self.vx
+        self.rect.y += self.vy
+        
+        # Remove if off screen (using world coordinates, not screen coordinates)
+        should_remove = (self.rect.x < -200 or self.rect.x > LEVEL_END_X + 300 or 
+                        self.rect.y < -200 or self.rect.y > HEIGHT + 200)
+        return should_remove
+
+    def draw(self, surf, camera_x):
+        # Draw a realistic slipper shape
+        screen_x = self.rect.x - camera_x
+        screen_y = self.rect.y
+        
+        # Only draw if on screen
+        if screen_x > -100 and screen_x < WIDTH + 100 and screen_y > -100 and screen_y < HEIGHT + 100:
+            # Draw slipper base (main sole)
+            pygame.draw.ellipse(surf, (139, 69, 19), (int(screen_x), int(screen_y + 8), 20, 12))  # Brown sole
+            # Draw slipper top (fabric part)
+            pygame.draw.ellipse(surf, (180, 100, 60), (int(screen_x + 2), int(screen_y + 3), 16, 10))  # Lighter brown fabric
+            # Draw heel part
+            pygame.draw.ellipse(surf, (120, 60, 30), (int(screen_x + 1), int(screen_y + 12), 6, 6))  # Dark heel
+            # Draw toe part highlight
+            pygame.draw.ellipse(surf, (200, 120, 80), (int(screen_x + 12), int(screen_y + 5), 6, 6))  # Toe highlight
+
+class Boss:
+    def __init__(self, x, y, level=1):
+        self.rect = pygame.Rect(x, y, 80, 80)
+        self.health = 3  # Three stages
+        self.stage = 1
+        self.level = level  # Boss level (increases every 5 game levels)
+        self.speed = 1.5 + (level - 1) * 0.3  # Slower movement, less speed increase per level
+        self.direction = 1
+        self.slipper_timer = 0
+        self.slipper_cooldown = max(90 - (level - 1) * 8, 50)  # Slower slipper throwing, longer cooldown
+        self.move_timer = 0
+        self.move_duration = 180  # Moves for longer periods (more predictable)
+        self.slippers = []
+        self.hit_invulnerable = 0  # Invulnerability frames after being hit
+        self.shout_frames = 0  # Frames to show "AHAAAAN!!" yelling
+
+    def update(self, player):
+        if self.hit_invulnerable > 0:
+            self.hit_invulnerable -= 1
+            
+        # Update shout timer
+        if self.shout_frames > 0:
+            self.shout_frames -= 1
+
+        # Stage-specific behavior
+        if self.stage == 1:
+            # Stage 1: Stationary, throws slippers in all directions
+            self.slipper_timer += 1
+            if self.slipper_timer >= self.slipper_cooldown:
+                self.throw_random_slippers()
+                self.slipper_timer = 0
+                # Mom yells when throwing slippers
+                self.shout_frames = 30  # Show "AHAAAAN!!" for 30 frames
+
+        elif self.stage == 2:
+            # Stage 2: Stationary, throws targeted slippers
+            self.slipper_timer += 1
+            if self.slipper_timer >= int(self.slipper_cooldown * 0.8):  # Slightly faster than stage 1, but not too fast
+                self.throw_targeted_slipper(player)
+                self.slipper_timer = 0
+                # Mom yells when throwing slippers
+                self.shout_frames = 30  # Show "AHAAAAN!!" for 30 frames
+
+        elif self.stage == 3:
+            # Stage 3: Moves around and throws targeted slippers
+            self.move_timer += 1
+            if self.move_timer >= self.move_duration:
+                self.direction *= -1
+                self.move_timer = 0
+
+            # Move horizontally
+            self.rect.x += self.speed * self.direction
+            if self.rect.left <= 200:
+                self.rect.left = 200
+                self.direction = 1
+            elif self.rect.right >= LEVEL_END_X - 200:
+                self.rect.right = LEVEL_END_X - 200
+                self.direction = -1
+
+            # Throw slippers
+            self.slipper_timer += 1
+            if self.slipper_timer >= int(self.slipper_cooldown * 0.6):  # Faster than stage 2, but not overwhelming
+                self.throw_targeted_slipper(player)
+                self.slipper_timer = 0
+                # Mom yells when throwing slippers
+                self.shout_frames = 30  # Show "AHAAAAN!!" for 30 frames
+
+        # Update slippers
+        self.slippers = [s for s in self.slippers if not s.update()]
+
+    def throw_random_slippers(self):
+        # Throw 3-4 slippers in different directions (reduced from 4-6)
+        import random
+        num_slippers = random.randint(3, 4)
+        for _ in range(num_slippers):
+            slipper = Slipper(self.rect.centerx, self.rect.centery, None, None, 3 + self.level * 0.5)  # Slower slippers
+            self.slippers.append(slipper)
+
+    def throw_targeted_slipper(self, player):
+        # Throw slipper towards player (slower speed)
+        slipper = Slipper(self.rect.centerx, self.rect.centery, 
+                         player.rect.centerx, player.rect.centery, speed=4 + self.level * 0.5)  # Slower targeted slippers
+        self.slippers.append(slipper)
+
+    def take_damage(self):
+        if self.hit_invulnerable <= 0:
+            self.health -= 1
+            self.stage += 1
+            self.hit_invulnerable = 180  # 3 seconds of invulnerability (increased from 2 seconds)
+            return True
+        return False
+
+    def is_defeated(self):
+        return self.health <= 0
+
+    def draw(self, surf, camera_x):
+        # Flash when invulnerable
+        if self.hit_invulnerable > 0 and self.hit_invulnerable % 10 < 5:
+            return
+
+        # Draw boss (mom)
+        # Body
+        pygame.draw.ellipse(surf, (255, 182, 193), (self.rect.x - camera_x, self.rect.y + 30, self.rect.w, self.rect.h - 30))
+        # Head
+        pygame.draw.ellipse(surf, SKIN, (self.rect.x + 15 - camera_x, self.rect.y, self.rect.w - 30, 40))
+        # Hair
+        pygame.draw.ellipse(surf, BROWN, (self.rect.x + 10 - camera_x, self.rect.y - 5, self.rect.w - 20, 25))
+        # Eyes
+        pygame.draw.ellipse(surf, BLACK, (self.rect.x + 25 - camera_x, self.rect.y + 15, 8, 8))
+        pygame.draw.ellipse(surf, BLACK, (self.rect.x + 45 - camera_x, self.rect.y + 15, 8, 8))
+        # Angry mouth
+        pygame.draw.arc(surf, BLACK, (self.rect.x + 30 - camera_x, self.rect.y + 25, 20, 10), 0, 3.14, 3)
+
+        # Draw "AHAAAAN!!" yelling bubble if mom is shouting
+        if self.shout_frames > 0:
+            font = pygame.font.Font(None, 30)
+            shout = font.render("AHAAAAN!!", True, YELLOW, BLACK)
+            surf.blit(shout, (self.rect.x - camera_x + 10, self.rect.y - 30))
+
+        # Draw health indicator
+        for i in range(self.health):
+            pygame.draw.circle(surf, RED, (self.rect.x - camera_x + 10 + i * 25, self.rect.y - 15), 8)
+
+        # Draw slippers
+        for slipper in self.slippers:
+            slipper.draw(surf, camera_x)
+
+class Mom:
+    def __init__(self, x, y):
+        self.x = x
+        self.y = y
+        self.rect = pygame.Rect(x, y-60, 46, 60)
+        self.throw_timer = 0
+        self.shout_frames = 0
+        self.slippers = []
+        
+    def update(self):
+        import random
+        self.throw_timer += 1
+        # Update shout timer
+        if self.shout_frames > 0:
+            self.shout_frames -= 1
+        
+        # Throw slippers randomly
+        if self.throw_timer > random.randint(180, 300):  # Every 3-5 seconds (more reasonable pace)
+            self.throw_timer = 0
+            self.shout_frames = 30  # Show "AHAAAAN!!" for 30 frames
+            # Throw multiple slippers in different directions
+            num_slippers = random.randint(3, 5)  # Throw 3-5 slippers
+            for _ in range(num_slippers):
+                # Create slipper with random direction (no target_x, target_y)
+                slipper = Slipper(self.x + 16, self.y - 30, None, None, random.randint(4, 8))  # Slightly slower slippers
+                self.slippers.append(slipper)
+            
+        # Update slippers
+        self.slippers = [s for s in self.slippers if not s.update()]
+        
+    def draw(self, surf, camera_x):
+        # Draw mom
+        pygame.draw.ellipse(surf, (255, 182, 193), (self.x - camera_x, self.y - 25, 46, 48))  # Saree
+        pygame.draw.ellipse(surf, SKIN, (self.x + 7 - camera_x, self.y - 60, 32, 32))  # Head
+        pygame.draw.ellipse(surf, BLACK, (self.x + 15 - camera_x, self.y - 47, 6, 10))  # Left eye
+        pygame.draw.ellipse(surf, BLACK, (self.x + 27 - camera_x, self.y - 47, 6, 10))  # Right eye
+        pygame.draw.circle(surf, BLACK, (self.x + 23 - camera_x, self.y - 63), 8)  # Hair
+        pygame.draw.arc(surf, BLACK, (self.x + 15 - camera_x, self.y - 37, 16, 8), 3.5, 6.0, 2)  # Angry mouth
+        
+        # Draw "AHAAAAN!!" yelling bubble if mom is shouting
+        if self.shout_frames > 0:
+            font = pygame.font.Font(None, 30)
+            shout = font.render("AHAAAAN!!", True, YELLOW, BLACK)
+            surf.blit(shout, (self.x - camera_x + 10, self.y - 82))
+            
+        # Draw slippers
+        for slipper in self.slippers:
+            slipper.draw(surf, camera_x)
 
 class Player:
     def __init__(self):
         self.rect = pygame.Rect(100, 100, PLAYER_SIZE, PLAYER_SIZE)
         self.vy = 0
         self.on_ground = False
-        self.invincible = False
-        self.invincible_timer = 0
-        self.speed_boost = False
-        self.speed_boost_timer = 0
-        self.coin_bonus = False
-        self.coin_bonus_timer = 0
-        self.jump_boost = False
-        self.jump_boost_timer = 0
+        self.lives = 1
+        self.speed_boost = 0
+        self.jump_boost = 0
+        self.immunity_timer = 0
+        self.speed_timer = 0
+        self.jump_timer = 0
+        self.base_speed = PLAYER_SPEED
+        self.base_jump = JUMP_HEIGHT
 
     def move(self, platforms):
+        # Update power-up timers
+        if self.immunity_timer > 0:
+            self.immunity_timer -= 1
+        if self.speed_timer > 0:
+            self.speed_timer -= 1
+        else:
+            self.speed_boost = 0
+        if self.jump_timer > 0:
+            self.jump_timer -= 1
+        else:
+            self.jump_boost = 0
+            
         keys = pygame.key.get_pressed()
         dx = 0
-        speed = PLAYER_SPEED
-        if self.speed_boost:
-            speed += 3
+        current_speed = self.base_speed + self.speed_boost
+        
         if keys[pygame.K_LEFT]:
-            dx -= speed
+            dx -= current_speed
         if keys[pygame.K_RIGHT]:
-            dx += speed
+            dx += current_speed
 
+        # Clamp to world's left and right boundaries
         new_x = self.rect.x + dx
         if new_x < 0:
             dx = -self.rect.x
@@ -91,11 +372,10 @@ class Player:
                     self.rect.left = plat.rect.right
 
         if keys[pygame.K_SPACE] and self.on_ground:
-            if self.jump_boost:
-                self.vy = JUMP_HEIGHT - 10
-            else:
-                self.vy = JUMP_HEIGHT
+            current_jump = self.base_jump + self.jump_boost
+            self.vy = current_jump
             self.on_ground = False
+            play_sound(JUMP_SOUND)
 
         self.vy += GRAVITY
         if self.vy > 15: self.vy = 15
@@ -119,30 +399,33 @@ class Player:
             self.rect.bottom = HEIGHT
             self.vy = 0
             self.on_ground = True
-
-        # Handle timers for boosts
-        if self.invincible_timer > 0:
-            self.invincible_timer -= 1
-            self.invincible = True
-            if self.invincible_timer == 0:
-                self.invincible = False
-        if self.speed_boost_timer > 0:
-            self.speed_boost_timer -= 1
-            self.speed_boost = True
-            if self.speed_boost_timer == 0:
-                self.speed_boost = False
-        if self.coin_bonus_timer > 0:
-            self.coin_bonus_timer -= 1
-            self.coin_bonus = True
-            if self.coin_bonus_timer == 0:
-                self.coin_bonus = False
-        if self.jump_boost_timer > 0:
-            self.jump_boost_timer -= 1
-            self.jump_boost = True
-            if self.jump_boost_timer == 0:
-                self.jump_boost = False
+    
+    def apply_powerup(self, power_type):
+        if power_type == 'speed':
+            self.speed_boost = 3  # +3 speed
+            self.speed_timer = 600  # 10 seconds at 60 FPS
+        elif power_type == 'jump':
+            self.jump_boost = -8  # Higher jump (more negative = higher)
+            self.jump_timer = 600  # 10 seconds at 60 FPS
+        elif power_type == 'life':
+            self.lives += 1
+    
+    def die(self):
+        if self.lives > 1:
+            self.lives -= 1
+            self.immunity_timer = 180  # 3 seconds of immunity
+            return False  # Not game over
+        else:
+            return True  # Game over
+    
+    def is_immune(self):
+        return self.immunity_timer > 0
 
     def draw(self, surf, camera_x):
+        # Flash when immune
+        if self.is_immune() and self.immunity_timer % 10 < 5:
+            return  # Skip drawing to create flashing effect
+            
         pygame.draw.ellipse(surf, RED, (self.rect.x-camera_x, self.rect.y+10, self.rect.w, self.rect.h-10))
         pygame.draw.ellipse(surf, SKIN, (self.rect.x+10-camera_x, self.rect.y+10, self.rect.w-20, self.rect.h//2-5))
         pygame.draw.ellipse(surf, BLUE, (self.rect.x+5-camera_x, self.rect.y, self.rect.w-10, 18))
@@ -151,11 +434,16 @@ class Player:
         pygame.draw.arc(surf, BLACK, (self.rect.x+18-camera_x, self.rect.y+37, 18,8), 3.5,6.0,2)
 
 class Enemy:
-    def __init__(self, x, y, plat_rect):
+    def __init__(self, x, y, enemy_type="homework", plat_rect=None):
         self.rect = pygame.Rect(x, y, 34, 34)
         self.speed = 2
         self.direction = 1
-        self.platform = plat_rect
+        # If plat_rect is not provided, create a default platform area
+        if plat_rect is None:
+            self.platform = pygame.Rect(x - 50, y, 134, 34)  # Default platform area
+        else:
+            self.platform = plat_rect
+        self.enemy_type = enemy_type  # "homework", "chores", "badminton", "shower"
 
     def move(self, platforms):
         self.rect.x += self.speed * self.direction
@@ -167,138 +455,42 @@ class Enemy:
             self.direction = -1
 
     def draw(self, surf, camera_x):
-        # Default enemy (we will override in subclasses)
-        pygame.draw.ellipse(surf, BROWN, (self.rect.x-camera_x, self.rect.y, self.rect.w, self.rect.h//2+6))
-        pygame.draw.ellipse(surf, SKIN, (self.rect.x+5-camera_x, self.rect.y+self.rect.h//2-4, self.rect.w-10, self.rect.h//2-2))
-        pygame.draw.ellipse(surf, BLACK, (self.rect.x+13-camera_x, self.rect.y+15, 5,7))
-        pygame.draw.ellipse(surf, BLACK, (self.rect.x+22-camera_x, self.rect.y+15, 5,7))
-
-class BookEnemy(Enemy):
-    def draw(self, surf, camera_x):
-        # Draw as a blue book with a face
-        pygame.draw.rect(surf, (120, 200, 230), (self.rect.x-camera_x, self.rect.y, self.rect.w, self.rect.h))
-        pygame.draw.line(surf, (230,230,255), (self.rect.x-camera_x+5, self.rect.y+5), (self.rect.x-camera_x+5, self.rect.y+self.rect.h-5), 3)
-        pygame.draw.rect(surf, (220,220,255), (self.rect.x-camera_x+5, self.rect.y+5, self.rect.w-10, self.rect.h-10), 2)
-        pygame.draw.ellipse(surf, BLACK, (self.rect.x+8-camera_x, self.rect.y+12, 5,7))
-        pygame.draw.ellipse(surf, BLACK, (self.rect.x+21-camera_x, self.rect.y+12, 5,7))
-        pygame.draw.arc(surf, BLACK, (self.rect.x+10-camera_x, self.rect.y+22, 13,5), 3.14, 0, 2)
-
-class BadmintonEnemy(Enemy):
-    def draw(self, surf, camera_x):
-        # Draw as a shuttlecock with angry face
-        pygame.draw.polygon(surf, (210,210,210), [
-            (self.rect.x-camera_x+17, self.rect.y),
-            (self.rect.x-camera_x+6, self.rect.y+26),
-            (self.rect.x-camera_x+28, self.rect.y+26)
-        ])
-        pygame.draw.ellipse(surf, (255,255,255), (self.rect.x-camera_x+6, self.rect.y+22, 22,12))
-        pygame.draw.ellipse(surf, BLACK, (self.rect.x+11-camera_x, self.rect.y+18, 3,4))
-        pygame.draw.ellipse(surf, BLACK, (self.rect.x+20-camera_x, self.rect.y+18, 3,4))
-        pygame.draw.arc(surf, BLACK, (self.rect.x+13-camera_x, self.rect.y+24, 7,4), 3.14, 0, 1)
-
-class ParentEnemy(Enemy):
-    def draw(self, surf, camera_x):
-        # Draw as stick-figure with a megaphone (speaker mouth)
-        pygame.draw.line(surf, BLACK, (self.rect.x-camera_x+17, self.rect.y+15), (self.rect.x-camera_x+17, self.rect.y+30), 3) # body
-        pygame.draw.circle(surf, (255,212,170), (self.rect.x-camera_x+17, self.rect.y+10), 8) # head
-        pygame.draw.line(surf, BLACK, (self.rect.x-camera_x+17, self.rect.y+25), (self.rect.x-camera_x+5, self.rect.y+20), 3) # left arm
-        pygame.draw.line(surf, BLACK, (self.rect.x-camera_x+17, self.rect.y+25), (self.rect.x-camera_x+30, self.rect.y+10), 3) # right arm (with megaphone)
-        pygame.draw.polygon(surf, (190,0,0), [
-            (self.rect.x-camera_x+31, self.rect.y+9), (self.rect.x-camera_x+39, self.rect.y+7), (self.rect.x-camera_x+37, self.rect.y+13)
-        ])
-        pygame.draw.arc(surf, BLACK, (self.rect.x+12-camera_x, self.rect.y+14, 10,5), 3.14, 0, 1)
-
-class Friend:
-    def __init__(self, x, y, kind="VideoGame"):
-        self.rect = pygame.Rect(x, y, 34, 34)
-        self.kind = kind
-        self.active = True
-
-    def draw(self, surf, camera_x):
-        if self.kind == "VideoGame":
-            # Draw a game controller
-            pygame.draw.ellipse(surf, (88,88,88), (self.rect.x-camera_x, self.rect.y+8, 34, 18))
-            pygame.draw.circle(surf, (220,34,44), (self.rect.x+13-camera_x, self.rect.y+17), 3)
-            pygame.draw.circle(surf, (45,89,220), (self.rect.x+21-camera_x, self.rect.y+17), 3)
-            pygame.draw.rect(surf, (40,40,40), (self.rect.x+12-camera_x, self.rect.y+13, 10,6), 1)
-        elif self.kind == "Lego":
-            # Draw a yellow lego brick
-            pygame.draw.rect(surf, (254,220,40), (self.rect.x-camera_x, self.rect.y+10, 34, 16))
+        if self.enemy_type == "homework":
+            # Draw homework book (brown book with lines)
+            pygame.draw.rect(surf, BROWN, (self.rect.x-camera_x, self.rect.y, self.rect.w, self.rect.h))
+            pygame.draw.rect(surf, WHITE, (self.rect.x-camera_x+3, self.rect.y+3, self.rect.w-6, self.rect.h-6))
+            # Draw lines on the book
             for i in range(3):
-                pygame.draw.ellipse(surf, (255,255,140), (self.rect.x-camera_x+5+10*i, self.rect.y+6, 8,8))
-        elif self.kind == "Pizza":
-            # Pizza slice!
-            pygame.draw.polygon(surf, (230,180,30), [
-                (self.rect.x-camera_x+17, self.rect.y+4), (self.rect.x-camera_x+32, self.rect.y+30), (self.rect.x-camera_x+2, self.rect.y+30)
-            ])
-            pygame.draw.circle(surf, (255,70,70), (self.rect.x-camera_x+17, self.rect.y+21), 5)
-            pygame.draw.circle(surf, (234,200,100), (self.rect.x-camera_x+9, self.rect.y+19), 2)
-            pygame.draw.circle(surf, (234,200,100), (self.rect.x-camera_x+24, self.rect.y+27), 2)
-        elif self.kind == "Drums":
-            # Draw drums: two circles (drums) and sticks
-            pygame.draw.circle(surf, (190, 90, 8), (self.rect.x+14-camera_x, self.rect.y+25), 9)
-            pygame.draw.circle(surf, (100,100,100), (self.rect.x+28-camera_x, self.rect.y+25), 7)
-            pygame.draw.line(surf, (255,229,180), (self.rect.x+19-camera_x, self.rect.y+16), (self.rect.x+21-camera_x, self.rect.y+7), 3)
-            pygame.draw.line(surf, (255,229,180), (self.rect.x+23-camera_x, self.rect.y+19), (self.rect.x+30-camera_x, self.rect.y+8), 3)
-        elif self.kind == "SoccerBall":
-            # Draw soccer ball - white circle with black patches
-            pygame.draw.circle(surf, (230,230,230), (self.rect.x+17-camera_x, self.rect.y+17), 16)
-            pygame.draw.polygon(surf, (10,10,10), [
-                (self.rect.x+14-camera_x, self.rect.y+11), (self.rect.x+22-camera_x, self.rect.y+11), (self.rect.x+18-camera_x, self.rect.y+18)
-            ])
-            pygame.draw.circle(surf, (10,10,10), (self.rect.x+18-camera_x, self.rect.y+23), 3)
-        elif self.kind == "RipStick":
-            # Draw a ripstick (long black oval with colored wheels)
-            pygame.draw.ellipse(surf, (20,20,20), (self.rect.x+5-camera_x, self.rect.y+10, 24, 7))
-            pygame.draw.circle(surf, (180,0,180), (self.rect.x+8-camera_x, self.rect.y+14), 3)
-            pygame.draw.circle(surf, (32,200,200), (self.rect.x+29-camera_x, self.rect.y+14), 3)
-        elif self.kind == "Bike":
-            # Draw a simple bike: two wheels and frame
-            pygame.draw.circle(surf, (60,60,60), (self.rect.x+10-camera_x, self.rect.y+26), 6)
-            pygame.draw.circle(surf, (60,60,60), (self.rect.x+28-camera_x, self.rect.y+26), 6)
-            pygame.draw.line(surf, (10,110,210), (self.rect.x+10-camera_x, self.rect.y+26), (self.rect.x+19-camera_x, self.rect.y+17), 2)
-            pygame.draw.line(surf, (200,40,10), (self.rect.x+28-camera_x, self.rect.y+26), (self.rect.x+19-camera_x, self.rect.y+17), 2)
-            pygame.draw.line(surf, (80,200,80), (self.rect.x+19-camera_x, self.rect.y+17), (self.rect.x+19-camera_x, self.rect.y+22), 2)
+                pygame.draw.line(surf, BLACK, (self.rect.x-camera_x+5, self.rect.y+8+i*6), 
+                               (self.rect.x-camera_x+29, self.rect.y+8+i*6), 2)
+                
+        elif self.enemy_type == "chores":
+            # Draw broom (cleaning chores)
+            pygame.draw.rect(surf, BROWN, (self.rect.x-camera_x+12, self.rect.y, 8, 20))  # Handle
+            pygame.draw.ellipse(surf, YELLOW, (self.rect.x-camera_x+5, self.rect.y+20, 22, 12))  # Broom head
+            
+        elif self.enemy_type == "badminton":
+            # Draw badminton racket
+            pygame.draw.ellipse(surf, RED, (self.rect.x-camera_x+8, self.rect.y, 18, 20))  # Racket head
+            pygame.draw.rect(surf, BROWN, (self.rect.x-camera_x+15, self.rect.y+15, 4, 15))  # Handle
+            # Draw strings
+            pygame.draw.line(surf, WHITE, (self.rect.x-camera_x+12, self.rect.y+5), 
+                           (self.rect.x-camera_x+12, self.rect.y+15), 1)
+            pygame.draw.line(surf, WHITE, (self.rect.x-camera_x+20, self.rect.y+5), 
+                           (self.rect.x-camera_x+20, self.rect.y+15), 1)
+                           
+        elif self.enemy_type == "shower":
+            # Draw shower head
+            pygame.draw.rect(surf, (180, 180, 180), (self.rect.x-camera_x+5, self.rect.y+5, 24, 15))
+            # Draw water drops
+            for i in range(4):
+                pygame.draw.circle(surf, BLUE, (self.rect.x-camera_x+8+i*5, self.rect.y+25), 2)
         else:
-            # Default: draw star
-            pygame.draw.polygon(surf, (255,223,65), [
-                (self.rect.x-camera_x+17, self.rect.y+3),
-                (self.rect.x-camera_x+22, self.rect.y+28),
-                (self.rect.x-camera_x+2, self.rect.y+12),
-                (self.rect.x-camera_x+32, self.rect.y+12),
-                (self.rect.x-camera_x+12, self.rect.y+28)
-            ])
-
-    def apply_power(self, player):
-        # Assign power-ups for new friends
-        if self.kind == "VideoGame":
-            player.invincible = True
-            player.invincible_timer = 180
-        elif self.kind == "Soccer" or self.kind == "SoccerBall":
-            player.speed_boost = True
-            player.speed_boost_timer = 180
-        elif self.kind == "RSM Math":
-            player.coin_bonus = True
-            player.coin_bonus_timer = 180
-        elif self.kind == "Swimming":
-            player.jump_boost = True
-            player.jump_boost_timer = 180
-        elif self.kind == "Lego":
-            player.invincible = True
-            player.invincible_timer = 120
-        elif self.kind == "Pizza":
-            player.coin_bonus = True
-            player.coin_bonus_timer = 300
-        elif self.kind == "Drums":
-            player.invincible = True
-            player.invincible_timer = 100
-        elif self.kind == "RipStick":
-            player.speed_boost = True
-            player.speed_boost_timer = 220
-        elif self.kind == "Bike":
-            player.speed_boost = True
-            player.speed_boost_timer = 240
-        self.active = False
+            # Default enemy (original design)
+            pygame.draw.ellipse(surf, BROWN, (self.rect.x-camera_x, self.rect.y, self.rect.w, self.rect.h//2+6))
+            pygame.draw.ellipse(surf, SKIN, (self.rect.x+5-camera_x, self.rect.y+self.rect.h//2-4, self.rect.w-10, self.rect.h//2-2))
+            pygame.draw.ellipse(surf, BLACK, (self.rect.x+13-camera_x, self.rect.y+15, 5,7))
+            pygame.draw.ellipse(surf, BLACK, (self.rect.x+22-camera_x, self.rect.y+15, 5,7))
 
 class Platform:
     def __init__(self, x, y, w, h):
@@ -316,62 +508,36 @@ class Coin:
         pygame.draw.ellipse(surf, WHITE, (self.rect.x+10-camera_x, self.rect.y+3, 6,5))
 
 class Pipe:
-    def __init__(self, x, y, width=50, height=70):
+    def __init__(self, x, y, width=50, height=70, is_warp_pipe=False):
         self.rect = pygame.Rect(x, y, width, height)
+        self.is_warp_pipe = is_warp_pipe
+        self.warp_timer = 0  # For animation when player can enter
+        
     def draw(self, surf, camera_x):
-        pygame.draw.rect(surf, PIPE_GREEN, (self.rect.x-camera_x, self.rect.y+15, self.rect.w, self.rect.h-15))
-        pygame.draw.ellipse(surf, PIPE_GREEN, (self.rect.x-camera_x-8, self.rect.y, self.rect.w+16, 28))
+        # Base pipe color - special glow for warp pipes
+        base_color = PIPE_GREEN
+        rim_color = PIPE_GREEN
+        
+        if self.is_warp_pipe:
+            # Magical glowing effect for warp pipes
+            import math
+            glow_intensity = int(50 + 30 * math.sin(self.warp_timer * 0.1))
+            base_color = (0, 140 + glow_intensity//2, 51 + glow_intensity//3)
+            rim_color = (0 + glow_intensity//4, 140 + glow_intensity//2, 51 + glow_intensity//2)
+            self.warp_timer += 1
+        
+        pygame.draw.rect(surf, base_color, (self.rect.x-camera_x, self.rect.y+15, self.rect.w, self.rect.h-15))
+        pygame.draw.ellipse(surf, rim_color, (self.rect.x-camera_x-8, self.rect.y, self.rect.w+16, 28))
         pygame.draw.rect(surf, (80,200,120), (self.rect.x-camera_x+9, self.rect.y+25, 8, self.rect.h-31))
-
-class Slipper:
-    def __init__(self, x, y, vx, vy):
-        self.rect = pygame.Rect(x, y, 36, 16)
-        self.vx = vx
-        self.vy = vy
-        self.angle = random.uniform(-0.5, 0.5)
-    def move(self):
-        self.rect.x += int(self.vx)
-        self.rect.y += int(self.vy)
-    def draw(self, surf, camera_x):
-        slipper_surf = pygame.Surface((36, 16), pygame.SRCALPHA)
-        pygame.draw.ellipse(slipper_surf, SLIPPER_BASE, (0, 0, 36, 16))
-        pygame.draw.arc(slipper_surf, BLACK, (1, 2, 34, 12), 0.3, 2.8, 2)
-        pygame.draw.line(slipper_surf, SLIPPER_STRAP, (18,2), (7,12), 4)
-        pygame.draw.line(slipper_surf, SLIPPER_STRAP, (18,2), (29,12), 4)
-        pygame.draw.line(slipper_surf, SLIPPER_STRAP, (15,6), (21,6), 3)
-        slipper_surf = pygame.transform.rotate(slipper_surf, self.angle*50)
-        surf.blit(slipper_surf, (self.rect.x-camera_x, self.rect.y))
-
-class Mom:
-    def __init__(self, x, y):
-        self.x = x
-        self.y = y
-        self.rect = pygame.Rect(x, y-60, 46, 60)
-        self.throw_timer = 0
-        self.shout_frames = 0
-    def update(self):
-        self.throw_timer += 1
-        if self.throw_timer > random.randint(100,160):
-            self.throw_timer = 0
-            self.shout_frames = 30  # show "AHAAAN!!" for 30 frames
-            return True
-        return False
-    def draw(self, surf, camera_x):
-        pygame.draw.ellipse(surf, MOM_SAREE, (self.x-camera_x, self.y-25, 46,48))
-        pygame.draw.ellipse(surf, SKIN, (self.x+7-camera_x, self.y-60, 32,32))
-        pygame.draw.ellipse(surf, BLACK, (self.x+15-camera_x, self.y-47, 6, 10))
-        pygame.draw.ellipse(surf, BLACK, (self.x+27-camera_x, self.y-47, 6, 10))
-        pygame.draw.circle(surf, BLACK, (self.x+23-camera_x, self.y-63), 8)
-        pygame.draw.arc(surf, BLACK, (self.x+15-camera_x, self.y-37, 16, 8), 3.5,6.0,2)
-        # Draw "AHAAAAN!!" bubble if needed
-        if self.shout_frames > 0:
-            font = pygame.font.Font(None, 30)
-            shout = font.render("AHAAAAN!!", True, YELLOW, BLACK)
-            surf.blit(shout, (self.x-camera_x+10, self.y-82))
-
-    def tick_shout(self):
-        if self.shout_frames > 0:
-            self.shout_frames -= 1
+        
+        # Draw magical sparkles for warp pipes
+        if self.is_warp_pipe:
+            import random
+            for i in range(3):
+                if random.randint(1, 10) == 1:  # Random sparkles
+                    sparkle_x = self.rect.x - camera_x + random.randint(5, self.rect.w-5)
+                    sparkle_y = self.rect.y + random.randint(10, self.rect.h-10)
+                    pygame.draw.circle(surf, YELLOW, (sparkle_x, sparkle_y), 2)
 
 class Flag:
     def __init__(self, x, y, height=140):
@@ -386,131 +552,504 @@ class Flag:
             (self.rect.x-camera_x+8, self.rect.y+47)
         ])
 
-def build_level(level):
-    import random
-    random.seed(level + random.randint(0, 1000000))
-    # Dynamic: mix up platforms, enemies, friends by level
+class PowerUp:
+    def __init__(self, x, y, power_type):
+        self.rect = pygame.Rect(x, y, 25, 25)
+        self.power_type = power_type  # 'speed', 'jump', 'life', 'nintendo', 'drums', 'soccer'
+        self.collected = False
+        self.float_timer = 0
+        self.original_y = y
+        
+    def update(self):
+        # Floating animation
+        self.float_timer += 0.1
+        self.rect.y = self.original_y + int(3 * pygame.math.Vector2(0, 1).rotate(self.float_timer * 10).y)
+        
+    def draw(self, surf, camera_x):
+        if self.collected:
+            return
+            
+        if self.power_type == 'speed':
+            # Draw pizza slice (speed boost - favorite Italian food)
+            # Crust
+            pygame.draw.polygon(surf, (255, 206, 84), [
+                (self.rect.x - camera_x + 2, self.rect.y + 20),
+                (self.rect.x - camera_x + 23, self.rect.y + 20),
+                (self.rect.x - camera_x + 12, self.rect.y + 2)
+            ])
+            # Cheese
+            pygame.draw.polygon(surf, (255, 255, 153), [
+                (self.rect.x - camera_x + 4, self.rect.y + 18),
+                (self.rect.x - camera_x + 21, self.rect.y + 18),
+                (self.rect.x - camera_x + 12, self.rect.y + 4)
+            ])
+            # Pepperoni
+            pygame.draw.circle(surf, (139, 0, 0), (self.rect.x - camera_x + 10, self.rect.y + 12), 2)
+            pygame.draw.circle(surf, (139, 0, 0), (self.rect.x - camera_x + 16, self.rect.y + 15), 2)
+            
+        elif self.power_type == 'jump':
+            # Draw donut (jump boost)
+            # Outer circle
+            pygame.draw.circle(surf, (139, 69, 19), (self.rect.x - camera_x + 12, self.rect.y + 12), 11)
+            # Inner hole
+            pygame.draw.circle(surf, (92, 192, 255), (self.rect.x - camera_x + 12, self.rect.y + 12), 5)
+            # Glaze
+            pygame.draw.circle(surf, (255, 182, 193), (self.rect.x - camera_x + 12, self.rect.y + 12), 9, 2)
+            # Sprinkles
+            pygame.draw.rect(surf, RED, (self.rect.x - camera_x + 8, self.rect.y + 8, 2, 6))
+            pygame.draw.rect(surf, GREEN, (self.rect.x - camera_x + 15, self.rect.y + 10, 6, 2))
+            pygame.draw.rect(surf, BLUE, (self.rect.x - camera_x + 10, self.rect.y + 15, 2, 4))
+            
+        elif self.power_type == 'life':
+            # Draw candy (extra life)
+            # Wrapper
+            pygame.draw.ellipse(surf, RED, (self.rect.x - camera_x + 2, self.rect.y + 8, 20, 10))
+            # Candy
+            pygame.draw.ellipse(surf, (255, 182, 193), (self.rect.x - camera_x + 4, self.rect.y + 9, 16, 8))
+            # Wrapper ends
+            pygame.draw.polygon(surf, (255, 215, 0), [
+                (self.rect.x - camera_x + 2, self.rect.y + 8),
+                (self.rect.x - camera_x, self.rect.y + 5),
+                (self.rect.x - camera_x, self.rect.y + 12),
+                (self.rect.x - camera_x + 2, self.rect.y + 18)
+            ])
+            pygame.draw.polygon(surf, (255, 215, 0), [
+                (self.rect.x - camera_x + 22, self.rect.y + 8),
+                (self.rect.x - camera_x + 24, self.rect.y + 5),
+                (self.rect.x - camera_x + 24, self.rect.y + 12),
+                (self.rect.x - camera_x + 22, self.rect.y + 18)
+            ])
+            
+        elif self.power_type == 'nintendo':
+            # Draw Nintendo Switch (gaming device - Ahaan's interest)
+            pygame.draw.rect(surf, BLACK, (self.rect.x - camera_x + 3, self.rect.y + 6, 18, 12))
+            pygame.draw.rect(surf, (100, 100, 100), (self.rect.x - camera_x + 5, self.rect.y + 8, 14, 8))
+            # Joy-Con controllers
+            pygame.draw.rect(surf, BLUE, (self.rect.x - camera_x, self.rect.y + 8, 4, 8))
+            pygame.draw.rect(surf, RED, (self.rect.x - camera_x + 20, self.rect.y + 8, 4, 8))
+            
+        elif self.power_type == 'drums':
+            # Draw drum set (music - Ahaan's interest)
+            pygame.draw.ellipse(surf, (139, 69, 19), (self.rect.x - camera_x + 5, self.rect.y + 10, 15, 10))
+            pygame.draw.ellipse(surf, (160, 82, 45), (self.rect.x - camera_x + 6, self.rect.y + 11, 13, 8))
+            # Drumsticks
+            pygame.draw.line(surf, BROWN, (self.rect.x - camera_x + 8, self.rect.y + 5), 
+                           (self.rect.x - camera_x + 10, self.rect.y + 12), 2)
+            pygame.draw.line(surf, BROWN, (self.rect.x - camera_x + 14, self.rect.y + 5), 
+                           (self.rect.x - camera_x + 16, self.rect.y + 12), 2)
+                           
+        elif self.power_type == 'soccer':
+            # Draw soccer ball (sports - Ahaan's interest)
+            pygame.draw.circle(surf, WHITE, (self.rect.x - camera_x + 12, self.rect.y + 12), 10)
+            pygame.draw.circle(surf, BLACK, (self.rect.x - camera_x + 12, self.rect.y + 12), 10, 2)
+            # Soccer ball pattern
+            pygame.draw.polygon(surf, BLACK, [
+                (self.rect.x - camera_x + 12, self.rect.y + 6),
+                (self.rect.x - camera_x + 8, self.rect.y + 10),
+                (self.rect.x - camera_x + 10, self.rect.y + 15),
+                (self.rect.x - camera_x + 14, self.rect.y + 15),
+                (self.rect.x - camera_x + 16, self.rect.y + 10)
+            ])
 
-    # Vary platform layouts per level
-    plat_configs = [
-        # Level 0: mostly left; Level 1: mid+right; Level 2: mid crossings, etc
-        [
-            (0, HEIGHT - 50, LEVEL_END_X+100, 50),
-            (random.randint(300,380), 450, 120, 20),
-            (random.randint(500,720), 330, 120, 20),
-            (random.randint(800,1050), 210, 100, 20),
-            (random.randint(900,1400), random.randint(350,440), 180, 24),
-            (random.randint(1200,1600), random.randint(280,480), 160, 20),
-            (random.randint(1550,1800), random.randint(200,330), 120, 20),
-            (random.randint(1800,2000), random.randint(220,330), 100, 20),
-        ],
-        [
-            (0, HEIGHT - 50, LEVEL_END_X+100, 50),
-            (random.randint(150,350), random.randint(350, 500), 100, 20),
-            (random.randint(600,900), random.randint(250, 400), 120, 15),
-            (random.randint(950,1300), random.randint(190, 400), 100, 15),
-            (random.randint(1200,1600), random.randint(120, 300), 140, 18),
-            (random.randint(1700,2100), random.randint(150, 420), 160, 16),
-        ],
-        [
-            (0, HEIGHT - 50, LEVEL_END_X+100, 50),
-            (random.randint(200,400), 350, 120, 20),
-            (random.randint(700,1100), 260, 110, 18),
-            (random.randint(1200,1700), 200, 150, 22),
-            (random.randint(1600,2100), random.randint(150,350), 160, 20),
+def create_normal_level(level_num=1):
+    # Determine level pattern based on level number
+    level_pattern = level_num % 4
+    
+    if level_pattern == 1:
+        # Homework Avoidance Theme - scattered platforms like a chaotic study session
+        platforms = [
+            Platform(0, HEIGHT - 50, LEVEL_END_X+100, 50),  # Ground
+            Platform(250, 450, 100, 20),   # Study desk
+            Platform(450, 380, 120, 20),   # Bookshelf
+            Platform(650, 320, 80, 20),    # Homework pile
+            Platform(850, 280, 140, 20),   # Teacher's desk
+            Platform(1100, 350, 100, 20),  # More homework
+            Platform(1350, 420, 120, 20),  # Escape platform
+            Platform(1600, 380, 100, 20),  # Freedom ahead
+            Platform(1850, 320, 120, 20)   # Final stretch
         ]
-    ]
-    plat = plat_configs[level % len(plat_configs)]
-    platforms = [Platform(*p) for p in plat]
 
-    # Select different sets of enemy/friend types for each level
-    # More expressive enemy and friend types reflecting Ahaan's likes and dislikes
-    ENEMY_TYPES = [
-        # Level 0: Homework, Chore (BookEnemy, ParentEnemy), Shower (BadmintonEnemy)
-        [BookEnemy, ParentEnemy, BadmintonEnemy],
-        # Level 1: CleanRoom (BookEnemy), NaggingParent (ParentEnemy), BadmintonClass (BadmintonEnemy)
-        [BookEnemy, ParentEnemy, BadmintonEnemy],
-        # Level 2: ForcedFood (BookEnemy), BadHabitParent (ParentEnemy), MoreChores (BadmintonEnemy)
-        [BookEnemy, ParentEnemy, BadmintonEnemy]
-    ]
-    FRIEND_TYPES = [
-        # Level 0: Gadgets, Sports, Family, New: Drums, SoccerBall, RipStick, Bike
-        ["VideoGame", "Soccer", "SoccerBall", "Pizza", "Lego", "Drums", "RipStick", "Bike"],
-        # Level 1: Music, Restaurant, Chess/Carrom, Drums, RipStick, Bike
-        ["Swimming", "Pizza", "RSM Math", "Lego", "Drums", "RipStick", "Bike"],
-        # Level 2: "Drums", "RockBand", "Bike", "Pizza", "SoccerBall", "RipStick"
-        ["Pizza", "Lego", "Soccer", "SoccerBall", "VideoGame", "Swimming", "Drums", "RipStick", "Bike"]
-    ]
-    etypes = ENEMY_TYPES[level % len(ENEMY_TYPES)]
-    ftypes = FRIEND_TYPES[level % len(FRIEND_TYPES)]
+        enemies = [
+            Enemy(270, 450-34, "homework", platforms[1].rect),   # Homework on study desk
+            Enemy(470, 380-34, "homework", platforms[2].rect),   # More homework
+            Enemy(870, 280-34, "homework", platforms[4].rect),   # Teacher homework
+            Enemy(1120, 350-34, "homework", platforms[5].rect),  # Even more homework
+            Enemy(1370, 420-34, "homework", platforms[6].rect),  # Endless homework
+        ]
 
-    # Place enemies: different types and arrangements per level for variety and complexity
-    enemies = []
-    friends = []
-    placed_enemy_pos = set()
-    placed_friend_pos = set()
-    level = level % len(ENEMY_TYPES)
-    # Enemies become more complex and numerous each level
-    for idx, plat in enumerate(platforms[1:]):
-        n = 1 + (level >= 1) + random.randint(0, level)  # more enemies in higher levels
-        enemy_types_this_level = etypes[:2 + (level > 0)]
-        for _ in range(n):
-            ex = plat.rect.x + random.randint(0, plat.rect.w-34)
-            if (ex, plat.rect.y-34) not in placed_enemy_pos:
-                eclass = random.choice(enemy_types_this_level)
-                enemies.append(eclass(ex, plat.rect.y-34, plat.rect))
-                placed_enemy_pos.add((ex, plat.rect.y-34))
-    # Friends: distribute "likes" based on level theme, increasing support in later levels
-    friendly_spots = random.sample(platforms[1:], min(4+level, len(platforms)-1))
-    for plat in friendly_spots:
-        fx = plat.rect.x + random.randint(0, plat.rect.w-34)
-        kind = random.choice(ftypes)
-        if (fx, plat.rect.y-34) not in placed_friend_pos:
-            friends.append(Friend(fx, plat.rect.y-34, kind))
-            placed_friend_pos.add((fx, plat.rect.y-34))
-    # GUARANTEED: always place one Drums and one SoccerBall friend in every level
-    drums_placed = any(f.kind == "Drums" for f in friends)
-    soccerball_placed = any(f.kind == "SoccerBall" for f in friends)
-    extra_platforms = platforms[1:]
-    if not drums_placed and extra_platforms:
-        plat = random.choice(extra_platforms)
-        fx = plat.rect.centerx
-        fy = plat.rect.y-34
-        if (fx, fy) not in placed_friend_pos:
-            friends.append(Friend(fx, fy, "Drums"))
-            placed_friend_pos.add((fx, fy))
-    if not soccerball_placed and extra_platforms:
-        plat = random.choice(extra_platforms)
-        fx = plat.rect.centerx + 10
-        fy = plat.rect.y-34
-        if (fx, fy) not in placed_friend_pos:
-            friends.append(Friend(fx, fy, "SoccerBall"))
-            placed_friend_pos.add((fx, fy))
-    # Coins: per level, random on platforms
-    coins = []
-    for plat in platforms[1:]:
-        for _ in range(random.randint(1, 3)):
-            cx = plat.rect.x + random.randint(0, plat.rect.w-20)
-            cy = plat.rect.y - random.randint(10, 30)
-            coins.append(Coin(cx, cy))
-    # Pipes: a few at diverse locations
-    pipes = [Pipe(random.randint(100, LEVEL_END_X-100), HEIGHT-120, 60, 70) for _ in range(3)]
+        coins = [
+            Coin(300, 430), Coin(500, 360), Coin(700, 300),
+            Coin(900, 260), Coin(1150, 330), Coin(1400, 400), Coin(1650, 360)
+        ]
+
+        # Power-ups that represent Ahaan's interests as escape from homework
+        powerups = [
+            PowerUp(380, 450, 'nintendo'),   # Gaming break
+            PowerUp(720, 300, 'drums'),      # Music therapy
+            PowerUp(980, 260, 'soccer'),     # Sports escape
+            PowerUp(1520, 360, 'speed')      # Pizza reward
+        ]
+        
+    elif level_pattern == 2:
+        # Chore Escape Theme - platforms like household items
+        platforms = [
+            Platform(0, HEIGHT - 50, LEVEL_END_X+100, 50),  # Ground
+            Platform(200, 420, 140, 20),   # Kitchen counter
+            Platform(400, 350, 100, 20),   # Washing machine
+            Platform(600, 280, 120, 20),   # Vacuum storage
+            Platform(800, 400, 100, 20),   # Laundry basket
+            Platform(1000, 320, 140, 20),  # Cleaning cabinet
+            Platform(1250, 380, 100, 20),  # Mop closet
+            Platform(1450, 300, 120, 20),  # Dish rack
+            Platform(1700, 420, 140, 20)   # Freedom zone
+        ]
+
+        enemies = [
+            Enemy(220, 420-34, "chores", platforms[1].rect),    # Kitchen chores
+            Enemy(420, 350-34, "chores", platforms[2].rect),    # Laundry chores
+            Enemy(820, 400-34, "chores", platforms[4].rect),    # Cleaning chores
+            Enemy(1270, 380-34, "chores", platforms[6].rect),   # More cleaning
+            Enemy(1470, 300-34, "chores", platforms[7].rect)    # Dish washing
+        ]
+
+        coins = [
+            Coin(270, 400), Coin(450, 330), Coin(650, 260),
+            Coin(850, 380), Coin(1100, 300), Coin(1300, 360), Coin(1550, 280)
+        ]
+
+        powerups = [
+            PowerUp(320, 400, 'drums'),      # Music while cleaning
+            PowerUp(680, 260, 'nintendo'),   # Gaming break
+            PowerUp(1180, 300, 'jump'),      # Donut treat
+            PowerUp(1620, 400, 'life')       # Candy reward
+        ]
+        
+    elif level_pattern == 3:
+        # Sports Challenge Theme - athletic course layout
+        platforms = [
+            Platform(0, HEIGHT - 50, LEVEL_END_X+100, 50),  # Ground
+            Platform(300, 400, 80, 20),    # Starting blocks
+            Platform(480, 320, 100, 20),   # Hurdle 1
+            Platform(680, 240, 80, 20),    # High jump
+            Platform(880, 360, 120, 20),   # Balance beam
+            Platform(1100, 280, 100, 20),  # Vault box
+            Platform(1350, 400, 140, 20),  # Finish line platform
+            Platform(1600, 320, 100, 20),  # Victory stand
+            Platform(1800, 380, 120, 20)   # Medal ceremony
+        ]
+
+        enemies = [
+            Enemy(320, 400-34, "badminton", platforms[1].rect), # Forced badminton
+            Enemy(500, 320-34, "badminton", platforms[2].rect), # More badminton
+            Enemy(900, 360-34, "badminton", platforms[4].rect), # Even more badminton
+            Enemy(1120, 280-34, "badminton", platforms[5].rect) # Endless badminton
+        ]
+
+        coins = [
+            Coin(340, 380), Coin(520, 300), Coin(720, 220),
+            Coin(920, 340), Coin(1140, 260), Coin(1400, 380), Coin(1640, 300)
+        ]
+
+        powerups = [
+            PowerUp(580, 300, 'soccer'),     # Real sports fun
+            PowerUp(760, 220, 'nintendo'),   # Gaming instead
+            PowerUp(1020, 340, 'drums'),     # Music over sports
+            PowerUp(1720, 360, 'speed')      # Pizza celebration
+        ]
+        
+    else:  # level_pattern == 0
+        # Shower Avoidance Theme - slippery, water-like platforms
+        platforms = [
+            Platform(0, HEIGHT - 50, LEVEL_END_X+100, 50),  # Ground
+            Platform(180, 450, 90, 15),    # Bathroom mat
+            Platform(350, 380, 70, 15),    # Soap dish
+            Platform(520, 320, 100, 15),   # Shower ledge
+            Platform(720, 280, 80, 15),    # Towel rack
+            Platform(900, 370, 110, 15),   # Bathtub edge
+            Platform(1150, 300, 90, 15),   # Shampoo shelf
+            Platform(1350, 420, 120, 15),  # Dry zone
+            Platform(1550, 350, 100, 15),  # Exit door
+            Platform(1750, 400, 140, 15)   # Freedom!
+        ]
+
+        enemies = [
+            Enemy(200, 450-34, "shower", platforms[1].rect),   # Shower time
+            Enemy(370, 380-34, "shower", platforms[2].rect),   # Bath time
+            Enemy(540, 320-34, "shower", platforms[3].rect),   # Wash hair
+            Enemy(920, 370-34, "shower", platforms[5].rect),   # Soap up
+            Enemy(1170, 300-34, "shower", platforms[6].rect),  # Rinse off
+            Enemy(1570, 350-34, "shower", platforms[8].rect)   # Final rinse
+        ]
+
+        coins = [
+            Coin(220, 430), Coin(390, 360), Coin(560, 300),
+            Coin(750, 260), Coin(950, 350), Coin(1190, 280), Coin(1590, 330)
+        ]
+
+        powerups = [
+            PowerUp(450, 360, 'nintendo'),   # Gaming to avoid shower
+            PowerUp(820, 260, 'drums'),      # Music distraction
+            PowerUp(1070, 350, 'life'),      # Candy comfort
+            PowerUp(1470, 400, 'jump')       # Donut escape
+        ]
+
+    # Mix of regular pipes and special warp pipes
+    pipes = [
+        Pipe(170, HEIGHT-120, 60, 70),  # Regular pipe
+        Pipe(570, HEIGHT-120, 60, 70, is_warp_pipe=True),  # SECRET WARP PIPE!
+        Pipe(980, HEIGHT-120, 60, 70),  # Regular pipe
+        Pipe(1380, HEIGHT-120, 60, 70, is_warp_pipe=True)  # SECRET WARP PIPE!
+    ]
+
     flag = Flag(LEVEL_END_X+35, HEIGHT-50)
-    mom = Mom(random.randint(680, 1600), HEIGHT-110)
-    slippers = []
-    return platforms, enemies, friends, coins, pipes, flag, mom, slippers
+    
+    # Add mom as an enemy in normal levels too
+    import random
+    mom = Mom(random.randint(800, 1400), HEIGHT-110)
+    
+    return platforms, enemies, coins, pipes, flag, powerups, mom
 
-def draw_volume_overlay(screen, volume_level):
-    """Draws the on-screen volume overlay."""
-    font = pygame.font.Font(None, 36)
-    overlay = font.render(f'Volume: {volume_level}/10', True, (255,255,255), (0, 0, 0, 140))
-    screen.blit(overlay, (WIDTH - overlay.get_width() - 40, HEIGHT - 50))
+def create_secret_level(secret_type=1):
+    """Create exciting secret worlds with special surprises for Ahaanio!"""
+    
+    if secret_type == 1:
+        # SECRET WORLD 1: "Ultimate Gaming Paradise"
+        platforms = [
+            Platform(0, HEIGHT - 50, LEVEL_END_X+100, 50),  # Ground
+            Platform(200, 450, 120, 20),   # Nintendo Switch platform
+            Platform(400, 380, 140, 20),   # PS5 platform
+            Platform(600, 320, 100, 20),   # Gaming chair
+            Platform(800, 260, 160, 20),   # Ultimate gaming setup
+            Platform(1100, 320, 120, 20),  # VR world
+            Platform(1350, 380, 140, 20),  # Arcade machines
+            Platform(1600, 300, 120, 20),  # Gaming trophy room
+            Platform(1850, 420, 200, 20)   # Victory gaming lounge
+        ]
+        
+        # No enemies in this paradise! Only power-ups and coins
+        enemies = []
+        
+        # TONS of gaming-related coins scattered everywhere
+        coins = [
+            Coin(230, 430), Coin(260, 430), Coin(290, 430),  # Switch coins
+            Coin(430, 360), Coin(460, 360), Coin(490, 360), Coin(520, 360),  # PS5 coins
+            Coin(630, 300), Coin(660, 300), Coin(690, 300),  # Gaming chair coins
+            Coin(820, 240), Coin(850, 240), Coin(880, 240), Coin(910, 240), Coin(940, 240),  # Setup coins
+            Coin(1130, 300), Coin(1160, 300), Coin(1190, 300), Coin(1220, 300),  # VR coins
+            Coin(1380, 360), Coin(1410, 360), Coin(1440, 360), Coin(1470, 360),  # Arcade coins
+            Coin(1630, 280), Coin(1660, 280), Coin(1690, 280), Coin(1720, 280),  # Trophy coins
+            Coin(1900, 400), Coin(1930, 400), Coin(1960, 400), Coin(1990, 400), Coin(2020, 400)  # Victory coins
+        ]
+        
+        # AMAZING power-ups - all of Ahaan's favorite things!
+        powerups = [
+            PowerUp(320, 430, 'nintendo'),   # Gaming heaven
+            PowerUp(520, 360, 'nintendo'),   # More gaming
+            PowerUp(880, 240, 'drums'),      # Music paradise  
+            PowerUp(1180, 300, 'soccer'),    # Sports fun
+            PowerUp(1420, 360, 'nintendo'),  # Even more gaming
+            PowerUp(1670, 280, 'drums'),     # Music everywhere
+            PowerUp(1950, 400, 'life'),      # Candy celebration
+            PowerUp(750, 240, 'speed'),      # Pizza party
+            PowerUp(1250, 300, 'jump'),      # Donut delight
+            PowerUp(1550, 280, 'soccer')     # Sports galore
+        ]
+        
+    elif secret_type == 2:
+        # SECRET WORLD 2: "Music & Sports Wonderland"
+        platforms = [
+            Platform(0, HEIGHT - 50, LEVEL_END_X+100, 50),  # Ground
+            Platform(180, 420, 100, 20),   # Drum kit platform
+            Platform(350, 350, 120, 20),   # Rock band stage
+            Platform(550, 280, 140, 20),   # Concert hall
+            Platform(780, 380, 100, 20),   # Soccer field
+            Platform(980, 320, 120, 20),   # Basketball court
+            Platform(1200, 260, 100, 20),  # Swimming pool deck
+            Platform(1400, 350, 140, 20),  # Tennis court
+            Platform(1650, 400, 180, 20)   # Championship podium
+        ]
+        
+        enemies = []  # No enemies in paradise!
+        
+        # Musical and sports themed coins
+        coins = [
+            Coin(210, 400), Coin(240, 400),  # Drum coins
+            Coin(380, 330), Coin(410, 330), Coin(440, 330),  # Band coins
+            Coin(580, 260), Coin(610, 260), Coin(640, 260), Coin(670, 260),  # Concert coins
+            Coin(810, 360), Coin(840, 360),  # Soccer coins
+            Coin(1010, 300), Coin(1040, 300), Coin(1070, 300),  # Basketball coins
+            Coin(1230, 240), Coin(1260, 240),  # Swimming coins
+            Coin(1430, 330), Coin(1460, 330), Coin(1490, 330),  # Tennis coins
+            Coin(1700, 380), Coin(1730, 380), Coin(1760, 380), Coin(1790, 380)  # Champion coins
+        ]
+        
+        powerups = [
+            PowerUp(220, 400, 'drums'),      # Drum paradise
+            PowerUp(420, 330, 'drums'),      # Rock band power
+            PowerUp(620, 260, 'drums'),      # Concert energy
+            PowerUp(820, 360, 'soccer'),     # Soccer skills
+            PowerUp(1020, 300, 'soccer'),    # Basketball power
+            PowerUp(1240, 240, 'nintendo'),  # Gaming break
+            PowerUp(1470, 330, 'soccer'),    # Tennis power
+            PowerUp(1750, 380, 'life'),      # Victory candy
+            PowerUp(600, 260, 'speed'),      # Pizza celebration
+            PowerUp(1100, 300, 'jump')       # Champion donut
+        ]
+    
+    else:  # secret_type == 3
+        # SECRET WORLD 3: "Food & Family Paradise"
+        platforms = [
+            Platform(0, HEIGHT - 50, LEVEL_END_X+100, 50),  # Ground
+            Platform(200, 440, 120, 20),   # Pizza restaurant
+            Platform(400, 370, 100, 20),   # Mediterranean cafe
+            Platform(600, 300, 140, 20),   # Italian bistro
+            Platform(850, 380, 120, 20),   # Family dining room
+            Platform(1100, 320, 100, 20),  # Chess & carrom table
+            Platform(1300, 260, 140, 20),  # Dessert paradise
+            Platform(1550, 350, 120, 20),  # Family game night
+            Platform(1800, 420, 200, 20)   # Ultimate feast table
+        ]
+        
+        enemies = []  # Pure happiness, no enemies!
+        
+        # Food and family themed coins
+        coins = [
+            Coin(230, 420), Coin(260, 420), Coin(290, 420),  # Pizza coins
+            Coin(430, 350), Coin(460, 350),  # Mediterranean coins
+            Coin(630, 280), Coin(660, 280), Coin(690, 280), Coin(720, 280),  # Italian coins
+            Coin(880, 360), Coin(910, 360), Coin(940, 360),  # Family coins
+            Coin(1130, 300), Coin(1160, 300),  # Game coins
+            Coin(1330, 240), Coin(1360, 240), Coin(1390, 240), Coin(1420, 240),  # Dessert coins
+            Coin(1580, 330), Coin(1610, 330), Coin(1640, 330),  # Game night coins
+            Coin(1850, 400), Coin(1880, 400), Coin(1910, 400), Coin(1940, 400), Coin(1970, 400)  # Feast coins
+        ]
+        
+        powerups = [
+            PowerUp(270, 420, 'speed'),      # Pizza power!
+            PowerUp(450, 350, 'speed'),      # Mediterranean energy
+            PowerUp(670, 280, 'speed'),      # Italian strength
+            PowerUp(920, 360, 'life'),       # Family love (candy)
+            PowerUp(1150, 300, 'nintendo'),  # Family gaming
+            PowerUp(1370, 240, 'life'),      # Dessert delight
+            PowerUp(1370, 240, 'jump'),      # Sweet donut
+            PowerUp(1620, 330, 'drums'),     # Family music time
+            PowerUp(1920, 400, 'life'),      # Ultimate feast candy
+            PowerUp(750, 280, 'soccer')      # Active family fun
+        ]
+    
+    # Special warp pipes to return to normal world
+    pipes = [
+        Pipe(100, HEIGHT-120, 60, 70, is_warp_pipe=True),   # Return pipe at start
+        Pipe(LEVEL_END_X-100, HEIGHT-120, 60, 70, is_warp_pipe=True)  # Return pipe at end
+    ]
+    
+    # Special victory flag
+    flag = Flag(LEVEL_END_X+35, HEIGHT-50)
+    
+    # No mom in secret world - it's pure paradise!
+    mom = None
+    
+    return platforms, enemies, coins, pipes, flag, powerups, mom
+
+def create_boss_level(boss_level):
+    # Boss level design with platforms leading up to the boss
+    platforms = [
+        Platform(0, HEIGHT - 50, LEVEL_END_X+100, 50),  # Ground platform
+        Platform(200, 480, 120, 20),   # First step up
+        Platform(380, 420, 120, 20),   # Second step up  
+        Platform(560, 360, 120, 20),   # Third step up
+        Platform(480, 250, 160, 30),   # Boss platform (wider and thicker)
+        Platform(720, 360, 120, 20),   # Platform on the other side
+        Platform(900, 420, 120, 20),   # Step down on right side
+        Platform(150, 380, 80, 20),    # Additional platform for maneuvering
+        Platform(800, 300, 80, 20)     # Additional platform for maneuvering
+    ]
+    
+    # No regular enemies in boss level
+    enemies = []
+    
+    # Coins placed strategically around the platforms
+    coins = [
+        Coin(230, 460), Coin(410, 400), Coin(590, 340),  # On the way up
+        Coin(750, 340), Coin(930, 400), Coin(180, 360)   # On platforms
+    ]
+    
+    # Power-ups for boss level (fewer but strategic) - Ahaan's favorite things for strength
+    powerups = [
+        PowerUp(260, 460, 'nintendo'),   # Gaming power for first platform
+        PowerUp(830, 280, 'drums'),      # Music power on side platform
+        PowerUp(450, 400, 'soccer')      # Sports power on second platform
+    ]
+    
+    # No pipes in boss level
+    pipes = []
+    
+    # No flag, boss serves as level end
+    flag = None
+    
+    # Create the boss on the central elevated platform
+    boss = Boss(520, 250 - 80, boss_level)  # Position boss on the boss platform
+    
+    return platforms, enemies, coins, pipes, flag, powerups, boss
+    # Boss level design with platforms leading up to the boss
+    platforms = [
+        Platform(0, HEIGHT - 50, LEVEL_END_X+100, 50),  # Ground platform
+        Platform(200, 480, 120, 20),   # First step up
+        Platform(380, 420, 120, 20),   # Second step up  
+        Platform(560, 360, 120, 20),   # Third step up
+        Platform(480, 250, 160, 30),   # Boss platform (wider and thicker)
+        Platform(720, 360, 120, 20),   # Platform on the other side
+        Platform(900, 420, 120, 20),   # Step down on right side
+        Platform(150, 380, 80, 20),    # Additional platform for maneuvering
+        Platform(800, 300, 80, 20)     # Additional platform for maneuvering
+    ]
+    
+    # No regular enemies in boss level
+    enemies = []
+    
+    # Coins placed strategically around the platforms
+    coins = [
+        Coin(230, 460), Coin(410, 400), Coin(590, 340),  # On the way up
+        Coin(750, 340), Coin(930, 400), Coin(180, 360)   # On platforms
+    ]
+    
+    # Power-ups for boss level (fewer but strategic) - Ahaan's favorite things for strength
+    powerups = [
+        PowerUp(260, 460, 'nintendo'),   # Gaming power for first platform
+        PowerUp(830, 280, 'drums'),      # Music power on side platform
+        PowerUp(450, 400, 'soccer')      # Sports power on second platform
+    ]
+    
+    # No pipes in boss level
+    pipes = []
+    
+    # No flag, boss serves as level end
+    flag = None
+    
+    # Create the boss on the central elevated platform
+    boss = Boss(520, 250 - 80, boss_level)  # Position boss on the boss platform
+    
+    return platforms, enemies, coins, pipes, flag, powerups, boss
 
 def main():
     screen = pygame.display.set_mode((WIDTH, HEIGHT))
     clock = pygame.time.Clock()
-    current_level = 0
-    max_level = 2
+
+    player = Player()
+    score = 0
+    camera_x = 0
+    current_level = 1
+    boss = None
+    mom = None
+    music_playing = False
+    music_volume = 0.3
+    
+    # Secret world state
+    in_secret_world = False
+    secret_world_type = 1
+    return_level = 1  # Which level to return to
+    return_score = 0  # Score before entering secret world
+    pipe_entry_timer = 0  # Cooldown for pipe entry
 
     # STORY PAGES as list of strings
     story_pages = [
@@ -523,90 +1062,21 @@ def main():
     ]
     story_page = 0
 
-    # Init all level-scoped variables at main scope
-    platforms, enemies, friends, coins, pipes, flag, mom, slippers = build_level(current_level)
+    # Initialize first level
+    platforms, enemies, coins, pipes, flag, powerups, mom = create_normal_level(current_level)
 
-    coinworld_entry_pipe = None
-    coinworld_exit_pipe = None
-    last_mainworld_pos = None
-
-    def enter_coin_world(from_pipe):
-        nonlocal state, coinworld_entry_pipe, coinworld_exit_pipe
-        nonlocal coinworld_platforms, coinworld_coins, coinworld_enemies, last_mainworld_pos
-    
-        # Save where we exited
-        last_mainworld_pos = player.rect.topleft
-        state = COIN_WORLD_STATE
-        coinworld_entry_pipe = from_pipe
-    
-        # Place player atop entrance
-        player.rect.x = 100
-        player.rect.y = HEIGHT - 200
-    
-        # Design platforms for coinworld
-        coinworld_platforms = [
-            Platform(0, HEIGHT-50, 600, 50),
-            Platform(200, HEIGHT-180, 120, 20),
-            Platform(410, HEIGHT-300, 120, 20),
-            Platform(480, HEIGHT-390, 100, 20)
-        ]
-        # Place coins
-        coinworld_coins = [
-            Coin(100, HEIGHT-180), Coin(260, HEIGHT-200), Coin(350, HEIGHT-275),
-            Coin(500, HEIGHT-375)
-        ]
-        # Add a simple enemy for challenge
-        coinworld_enemies = [Enemy(220, HEIGHT-214, coinworld_platforms[1].rect)]
-        # Add the exit pipe (on right side)
-        coinworld_exit_pipe = Pipe(520, HEIGHT-120, 60, 70)
-
-
-    player = Player()
-    score = 0
-    camera_x = 0
-
-    # --- Volume control state ---
-    volume_level = 3  # 0 to 10, syncs to mixer volume (0.0 to 1.0)
-    volume_change_tick = 0
-    last_volume_text = ""
-    volume_display_timer = 0  # frames to show "Volume: X/10"
-    VOLUME_COOLDOWN = 10  # frames before allowing the next volume change
     running = True
     state = "START"
-    COIN_WORLD_STATE = "COIN_WORLD"
-    coinworld_entry_pipe = None  # Remember from which pipe we entered
-    # --- Coin World Entities ---
-    coinworld_platforms = []
-    coinworld_coins = []
-    coinworld_enemies = []
-    coinworld_exit_pipe = None
-
-    # For story flow handling
-    in_story = False
 
     while running:
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
                 running = False
         keys = pygame.key.get_pressed()
-
-        # --- Handle Global Volume Keys ---
-  # Volume keys: +, =, PageUp to raise; -, _, PageDown to lower
-        vkey = False
-        if (keys[pygame.K_PLUS] or keys[pygame.K_EQUALS]):
-            # Raise volume
-            if volume_level < 10:
-                volume_level += 1
-                vkey = True
-        if (keys[pygame.K_MINUS] or keys[pygame.K_UNDERSCORE]):
-            if volume_level > 0:
-                volume_level -= 1
-                vkey = True
-        if vkey and BGM_ENABLED:
-            pygame.mixer.music.set_volume(volume_level / 10.0)
-            volume_display_timer = FPS * 2  # show overlay for 2 seconds
-
         if state == "START":
+            if not music_playing:
+                start_background_music()
+                music_playing = True
             screen.fill(BLACK)
             title = pygame.font.Font(None, 64).render("Super Ahaanio", True, YELLOW)
             prompt = pygame.font.Font(None, 36).render("Press SPACE to Start", True, WHITE)
@@ -614,14 +1084,17 @@ def main():
             screen.blit(title, ((WIDTH-title.get_width())//2, HEIGHT//2-70))
             screen.blit(prompt, ((WIDTH-prompt.get_width())//2, HEIGHT//2))
             screen.blit(story_prompt, ((WIDTH-story_prompt.get_width())//2, HEIGHT//2+60))
-            if volume_display_timer > 0:
-                draw_volume_overlay(screen, volume_level)
-                volume_display_timer -= 1
             pygame.display.flip()
             if keys[pygame.K_RETURN]:
                 state = "STORY"
                 story_page = 0
             elif keys[pygame.K_SPACE]:
+                # Reset player and level when starting game directly
+                player.__init__()
+                current_level = 1
+                boss = None
+                platforms, enemies, coins, pipes, flag, powerups, mom = create_normal_level(current_level)
+                score = 0
                 state = "PLAY"
             clock.tick(FPS)
             continue
@@ -655,10 +1128,8 @@ def main():
             render_multiline(page_text, font, color, 100, int(WIDTH * 0.8))
             skip = pygame.font.Font(None, 24).render("Press S to skip story", True, WHITE)
             screen.blit(skip, (WIDTH-240, HEIGHT-34))
-            if volume_display_timer > 0:
-                draw_volume_overlay(screen, volume_level)
-                volume_display_timer -= 1
             pygame.display.flip()
+            
             # Debounce space key: advance only on new press
             if not hasattr(main, 'story_last_space'):
                 main.story_last_space = False
@@ -672,178 +1143,307 @@ def main():
             else:
                 main.story_last_space = False
             if keys[pygame.K_s]:
+                # Reset player and level when skipping story
+                player.__init__()
+                current_level = 1
+                boss = None
+                platforms, enemies, coins, pipes, flag, powerups, mom = create_normal_level(current_level)
+                score = 0
                 state = "PLAY"
             clock.tick(FPS)
             continue
         if state == "GAMEOVER":
+            play_sound(GAME_OVER_SOUND)
             screen.fill(BLACK)
             msg = pygame.font.Font(None, 64).render("Game Over!", True, RED)
             score_display = pygame.font.Font(None, 36).render(f"Score: {score}", True, YELLOW)
+            level_display = pygame.font.Font(None, 36).render(f"Level: {current_level}", True, WHITE)
             prompt = pygame.font.Font(None, 36).render("Press SPACE to Restart", True, WHITE)
             screen.blit(msg, ((WIDTH-msg.get_width())//2, HEIGHT//2-70))
-            screen.blit(score_display, ((WIDTH-score_display.get_width())//2, HEIGHT//2))
-            screen.blit(prompt, ((WIDTH-prompt.get_width())//2, HEIGHT//2+50))
+            screen.blit(score_display, ((WIDTH-score_display.get_width())//2, HEIGHT//2-20))
+            screen.blit(level_display, ((WIDTH-level_display.get_width())//2, HEIGHT//2+20))
+            screen.blit(prompt, ((WIDTH-prompt.get_width())//2, HEIGHT//2+70))
             pygame.display.flip()
             if keys[pygame.K_SPACE]:
                 player.__init__()
-                enemies[:] = [
-                    Enemy(320, 450-34, platforms[1].rect),
-                    Enemy(500, 330-34, platforms[2].rect),
-                    Enemy(650, 210-34, platforms[3].rect),
-                    Enemy(950, 400-34, platforms[4].rect)
-                ]
-                coins[:] = [
-                    Coin(350, 430), Coin(500, 310), Coin(700, 190),
-                    Coin(950, 380), Coin(1020, 380)
-                ]
-                slippers.clear()
-                mom.throw_timer = 0
-                mom.shout_frames = 0
+                current_level = 1
+                boss = None
+                platforms, enemies, coins, pipes, flag, powerups, mom = create_normal_level(current_level)
                 state = "PLAY"
                 score = 0
-            if volume_display_timer > 0:
-                draw_volume_overlay(screen, volume_level)
-                volume_display_timer -= 1
-            clock.tick(FPS)
-            continue
-        if state == COIN_WORLD_STATE:
-            player.move(coinworld_platforms)
-            for enemy in coinworld_enemies:
-                enemy.move(coinworld_platforms)
-            for e in coinworld_enemies[:]:
-                if player.rect.colliderect(e.rect):
-                    state = "GAMEOVER"
-                    break
-            for coin in coinworld_coins[:]:
-                if player.rect.colliderect(coin.rect):
-                    coinworld_coins.remove(coin)
-                    score += 1
-            # Collide with exit pipe to return to main world
-            if player.rect.colliderect(coinworld_exit_pipe.rect):
-                # place player back atop the originating pipe
-                player.rect.topleft = (
-                    coinworld_entry_pipe.rect.x + (coinworld_entry_pipe.rect.w - player.rect.w)//2,
-                    coinworld_entry_pipe.rect.top - player.rect.h
-                )
-                state = "PLAY"
-        
-            # Draw coinworld scene
-            screen.fill((56, 56, 92))
-            for p in coinworld_platforms:
-                p.draw(screen, 0)
-            for e in coinworld_enemies:
-                e.draw(screen, 0)
-            for c in coinworld_coins:
-                c.draw(screen, 0)
-            coinworld_exit_pipe.draw(screen, 0)
-            player.draw(screen, 0)
-            # Score in corner
-            font = pygame.font.Font(None, 36)
-            text = font.render(f'Score: {score}', True, GOLDEN)
-            screen.blit(text, (10, 10))
-            # Show Exit Pipe Label
-            exit_label = pygame.font.Font(None, 30).render("Exit", True, WHITE, None)
-            screen.blit(exit_label, (coinworld_exit_pipe.rect.x + 10, coinworld_exit_pipe.rect.y - 25))
-        
-            pygame.display.flip()
-            if volume_display_timer > 0:
-                draw_volume_overlay(screen, volume_level)
-                volume_display_timer -= 1
-            clock.tick(FPS)
-            continue
-            pygame.display.flip()
-            if volume_display_timer > 0:
-                draw_volume_overlay(screen, volume_level)
-                volume_display_timer -= 1
             clock.tick(FPS)
             continue
         if state == "COMPLETE":
+            play_sound(LEVEL_COMPLETE_SOUND)
             screen.fill(BLACK)
-            msg = pygame.font.Font(None, 64).render("Level Complete!", True, YELLOW)
-            score_display = pygame.font.Font(None, 36).render(f"Final Score: {score}", True, GOLDEN)
-            prompt_next = pygame.font.Font(None, 36).render("Press ENTER for Next Level", True, WHITE)
-            prompt_restart = pygame.font.Font(None, 28).render("Press SPACE to Restart Current Level", True, WHITE)
-            screen.blit(msg, ((WIDTH-msg.get_width())//2, HEIGHT//2-90))
-            screen.blit(score_display, ((WIDTH-score_display.get_width())//2, HEIGHT//2-24))
-            screen.blit(prompt_next, ((WIDTH-prompt_next.get_width())//2, HEIGHT//2+40))
-            screen.blit(prompt_restart, ((WIDTH-prompt_restart.get_width())//2, HEIGHT//2+90))
+            if current_level % 5 == 0:
+                msg = pygame.font.Font(None, 64).render("Boss Defeated!", True, YELLOW)
+            else:
+                msg = pygame.font.Font(None, 64).render("Level Complete!", True, YELLOW)
+            score_display = pygame.font.Font(None, 36).render(f"Score: {score}", True, GOLDEN)
+            level_display = pygame.font.Font(None, 36).render(f"Level: {current_level}", True, WHITE)
+            prompt = pygame.font.Font(None, 36).render("Press SPACE for Next Level", True, WHITE)
+            screen.blit(msg, ((WIDTH-msg.get_width())//2, HEIGHT//2-70))
+            screen.blit(score_display, ((WIDTH-score_display.get_width())//2, HEIGHT//2-20))
+            screen.blit(level_display, ((WIDTH-level_display.get_width())//2, HEIGHT//2+20))
+            screen.blit(prompt, ((WIDTH-prompt.get_width())//2, HEIGHT//2+70))
             pygame.display.flip()
-            if keys[pygame.K_RETURN]:
-                if current_level + 1 < max_level:
-                    current_level += 1
+            if keys[pygame.K_SPACE]:
+                # Save power-up state before resetting player
+                saved_lives = player.lives
+                saved_speed_boost = player.speed_boost
+                saved_jump_boost = player.jump_boost
+                saved_immunity_timer = player.immunity_timer
+                saved_speed_timer = player.speed_timer
+                saved_jump_timer = player.jump_timer
+                
+                player.__init__()
+                
+                # Restore power-up state
+                player.lives = saved_lives
+                player.speed_boost = saved_speed_boost
+                player.jump_boost = saved_jump_boost
+                player.immunity_timer = saved_immunity_timer
+                player.speed_timer = saved_speed_timer
+                player.jump_timer = saved_jump_timer
+                
+                current_level += 1
+                
+                # Check if next level is a boss level
+                if current_level % 5 == 0:
+                    boss_level = current_level // 5
+                    platforms, enemies, coins, pipes, flag, powerups, boss = create_boss_level(boss_level)
+                    mom = None  # No mom in boss levels
+                    # Lower music volume for boss fights to hear sound effects better
+                    set_music_volume(0.15)
                 else:
-                    current_level = 0
-                player.__init__()
-                platforms, enemies, friends, coins, pipes, flag, mom, slippers = build_level(current_level)
-                state = "PLAY"
-            elif keys[pygame.K_SPACE]:
-                player.__init__()
-                platforms, enemies, friends, coins, pipes, flag, mom, slippers = build_level(current_level)
+                    boss = None
+                    platforms, enemies, coins, pipes, flag, powerups, mom = create_normal_level(current_level)
+                    # Normal volume for regular levels
+                    set_music_volume(0.3)
+                
                 state = "PLAY"
             clock.tick(FPS)
             continue
+
         # --- Game Play ---
+        # Handle music volume controls
+        if keys[pygame.K_PLUS] or keys[pygame.K_EQUALS]:
+            music_volume = min(1.0, music_volume + 0.01)
+            set_music_volume(music_volume)
+        if keys[pygame.K_MINUS]:
+            music_volume = max(0.0, music_volume - 0.01)
+            set_music_volume(music_volume)
+        if keys[pygame.K_m]:
+            if music_volume > 0:
+                set_music_volume(0)
+            else:
+                set_music_volume(0.3)
+                music_volume = 0.3
+        
         player.move(platforms)
+        
+        # Handle mom enemy if exists (normal levels)
+        if mom:
+            mom.update()
+            
+            # Check collision with mom's slippers
+            for slipper in mom.slippers[:]:
+                if player.rect.colliderect(slipper.rect) and not player.is_immune():
+                    if player.die():  # Returns True if game over
+                        state = "GAMEOVER"
+                    else:
+                        # Player respawned with immunity
+                        play_sound(BOSS_HIT_SOUND)
+                    break
+        
+        # Handle boss fight if boss exists
+        if boss:
+            boss.update(player)
+            
+            # Check collision with boss slippers
+            for slipper in boss.slippers[:]:
+                if player.rect.colliderect(slipper.rect) and not player.is_immune():
+                    if player.die():  # Returns True if game over
+                        state = "GAMEOVER"
+                    else:
+                        # Player respawned with immunity
+                        play_sound(BOSS_HIT_SOUND)
+                    break
+            
+            # Check if player can stomp on boss
+            if player.rect.colliderect(boss.rect):
+                if player.vy > 0 and player.rect.bottom - boss.rect.top < 40 and player.rect.top < boss.rect.top + 10:  # More forgiving stomp detection
+                    if boss.take_damage():
+                        player.vy = JUMP_HEIGHT // 2
+                        score += 500  # Bonus for hitting boss
+                        play_sound(BOSS_HIT_SOUND)
+                        
+                        if boss.is_defeated():
+                            score += 1000  # Big bonus for defeating boss
+                            state = "COMPLETE"
+                elif not player.is_immune():
+                    # Player touched boss but didn't stomp
+                    if player.die():  # Returns True if game over
+                        state = "GAMEOVER"
+                    else:
+                        # Player respawned with immunity
+                        play_sound(BOSS_HIT_SOUND)
+        
+        # Handle regular enemies
         stomped = False
         remove_enemies = []
-
         for enemy in enemies:
             enemy.move(platforms)
         for i,enemy in enumerate(enemies):
-            if player.rect.colliderect(enemy.rect):
-                if player.invincible:
-                    remove_enemies.append(i)
-                    score += 100
-                elif player.vy > 0 and player.rect.bottom - enemy.rect.top < 24 and player.rect.top < enemy.rect.top:
+            if player.rect.colliderect(enemy.rect) and not player.is_immune():
+                if player.vy > 0 and player.rect.bottom - enemy.rect.top < 24 and player.rect.top < enemy.rect.top:
                     remove_enemies.append(i)
                     player.vy = JUMP_HEIGHT // 2
                     stomped = True
                     score += 100
+                    play_sound(ENEMY_DEFEAT_SOUND)
                 else:
-                    state = "GAMEOVER"
+                    # Player was killed by enemy
+                    if player.die():  # Returns True if game over
+                        state = "GAMEOVER"
+                    else:
+                        # Player respawned with immunity, play a sound
+                        play_sound(BOSS_HIT_SOUND)  # Reuse boss hit sound for respawn
                     break
         for idx in sorted(remove_enemies, reverse=True):
             del enemies[idx]
-        for friend in friends:
-            if friend.active and player.rect.colliderect(friend.rect):
-                friend.apply_power(player)
+            
+        # Handle coin collection
         for coin in coins[:]:
             if player.rect.colliderect(coin.rect):
                 coins.remove(coin)
-                if player.coin_bonus:
-                    score += 2
-                else:
-                    score += 1
+                score += 1
+                play_sound(COIN_SOUND)
+                
+        # Handle power-up collection
+        for powerup in powerups[:]:
+            if not powerup.collected and player.rect.colliderect(powerup.rect):
+                powerup.collected = True
+                player.apply_powerup(powerup.power_type)
+                powerups.remove(powerup)
+                score += 50  # Bonus points for power-ups
+                play_sound(LEVEL_COMPLETE_SOUND)  # Special sound for power-ups
+                
+        # Update power-ups
+        for powerup in powerups:
+            powerup.update()
+                
+        # Handle pipe collisions and secret world entry
+        pipe_entered = False
         for pipe in pipes:
             if player.rect.colliderect(pipe.rect):
                 if player.rect.bottom > pipe.rect.top and player.vy >= 0:
                     player.rect.bottom = pipe.rect.top
                     player.vy = 0
                     player.on_ground = True
-                    # (NEW) Enter the pipe if DOWN key is pressed
-                    if keys[pygame.K_DOWN] and player.rect.bottom == pipe.rect.top:
-                        enter_coin_world(pipe)  # Call your coinworld function
+                
+                # Check for warp pipe entry (DOWN key + on warp pipe + not in cooldown)
+                if (pipe.is_warp_pipe and keys[pygame.K_DOWN] and 
+                    player.on_ground and pipe_entry_timer <= 0 and not pipe_entered):
+                    
+                    if not in_secret_world:
+                        # Entering secret world
+                        pipe_entered = True
+                        in_secret_world = True
+                        return_level = current_level
+                        return_score = score
+                        
+                        # Choose secret world type based on current level
+                        import random
+                        secret_world_type = ((current_level - 1) % 3) + 1
+                        
+                        # Create secret level
+                        platforms, enemies, coins, pipes, flag, powerups, mom = create_secret_level(secret_world_type)
+                        boss = None
+                        
+                        # Reset player position for secret world
+                        player.rect.x = 150
+                        player.rect.y = HEIGHT - 100
+                        player.vy = 0
+                        
+                        # Bonus score for finding secret world!
+                        score += 500
+                        
+                        # Play special sound
+                        play_sound(LEVEL_COMPLETE_SOUND)
+                        
+                        # Reset camera
+                        camera_x = 0
+                        
+                        # Set pipe entry cooldown
+                        pipe_entry_timer = 60  # 1 second cooldown
+                        
+                    else:
+                        # Returning from secret world
+                        pipe_entered = True
+                        in_secret_world = False
+                        current_level = return_level
+                        
+                        # Keep the score gained in secret world, don't reset it
+                        
+                        # Recreate the original level
+                        if current_level % 5 == 0:
+                            boss_level = current_level // 5
+                            platforms, enemies, coins, pipes, flag, powerups, boss = create_boss_level(boss_level)
+                            mom = None
+                        else:
+                            boss = None
+                            platforms, enemies, coins, pipes, flag, powerups, mom = create_normal_level(current_level)
+                        
+                        # Reset player position
+                        player.rect.x = 150
+                        player.rect.y = HEIGHT - 100
+                        player.vy = 0
+                        
+                        # Play return sound
+                        play_sound(JUMP_SOUND)
+                        
+                        # Reset camera
+                        camera_x = 0
+                        
+                        # Set pipe entry cooldown
+                        pipe_entry_timer = 60  # 1 second cooldown
+                    
+                    break  # Exit pipe loop after entering
+        
+        # Update pipe entry cooldown
+        if pipe_entry_timer > 0:
+            pipe_entry_timer -= 1
 
-        # Mom throwing slippers in all directions (enemy)
-        if mom.update():
-            angle = random.uniform(-1.4, 1.4)
-            speed = random.randint(8,13)
-            vx = int(speed * -1 * (random.uniform(0.6, 1.2)) * random.choice([-1,1]))
-            vy = int(-7 * (random.uniform(0.2, 1.2)) * random.choice([-1,1]))
-            slippers.append(Slipper(mom.x + 16, mom.y-30, vx, vy))
-        mom.tick_shout()
-
-        for slipper in slippers[:]:
-            slipper.move()
-            if player.rect.colliderect(slipper.rect):
-                if not player.invincible:
-                    state = "GAMEOVER"
-            if (slipper.rect.right < 0 or slipper.rect.left > LEVEL_END_X+200 or
-                slipper.rect.top > HEIGHT or slipper.rect.bottom < 0):
-                slippers.remove(slipper)
-
-        if player.rect.colliderect(flag.rect):
-            state = "COMPLETE"
+        # Handle flag collision (only for non-boss levels)
+        if flag and player.rect.colliderect(flag.rect):
+            if in_secret_world:
+                # Completing secret world gives bonus but returns to normal world
+                score += 1000  # Big bonus for completing secret world!
+                in_secret_world = False
+                current_level = return_level
+                
+                # Recreate the original level
+                if current_level % 5 == 0:
+                    boss_level = current_level // 5
+                    platforms, enemies, coins, pipes, flag, powerups, boss = create_boss_level(boss_level)
+                    mom = None
+                else:
+                    boss = None
+                    platforms, enemies, coins, pipes, flag, powerups, mom = create_normal_level(current_level)
+                
+                # Reset player position
+                player.rect.x = 150
+                player.rect.y = HEIGHT - 100
+                player.vy = 0
+                camera_x = 0
+                
+                # Play special completion sound
+                play_sound(LEVEL_COMPLETE_SOUND)
+            else:
+                # Normal level completion
+                state = "COMPLETE"
 
         camera_x = player.rect.centerx - WIDTH // 2
         if camera_x < 0:
@@ -853,34 +1453,97 @@ def main():
             camera_x = max_cam
 
         screen.fill((92,192,255))
+        
+        # Draw level elements
         for platform in platforms:
             platform.draw(screen, camera_x)
         for pipe in pipes:
             pipe.draw(screen, camera_x)
         for enemy in enemies:
             enemy.draw(screen, camera_x)
-        for friend in friends:
-            if friend.active:
-                friend.draw(screen, camera_x)
         for coin in coins:
             coin.draw(screen, camera_x)
-        mom.draw(screen, camera_x)
-        for slipper in slippers:
-            slipper.draw(screen, camera_x)
-        flag.draw(screen, camera_x)
+        for powerup in powerups:
+            powerup.draw(screen, camera_x)
+        
+        # Draw flag only if it exists (not in boss levels)
+        if flag:
+            flag.draw(screen, camera_x)
+            
+        # Draw mom if it exists (normal levels)
+        if mom:
+            mom.draw(screen, camera_x)
+            
+        # Draw boss if it exists
+        if boss:
+            boss.draw(screen, camera_x)
+            
         player.draw(screen, camera_x)
-
+        
+        # UI elements
         font = pygame.font.Font(None, 36)
         text = font.render(f'Score: {score}', True, BLACK)
         screen.blit(text, (10, 10))
-        if volume_display_timer > 0:
-            draw_volume_overlay(screen, volume_level)
-            volume_display_timer -= 1
+        
+        # Show secret world indicator
+        if in_secret_world:
+            level_text = font.render(f'SECRET WORLD {secret_world_type}!', True, GOLDEN)
+            screen.blit(level_text, (10, 50))
+            secret_hint = pygame.font.Font(None, 24).render('Find warp pipes to return!', True, YELLOW)
+            screen.blit(secret_hint, (10, 90))
+        else:
+            level_text = font.render(f'Level: {current_level}', True, BLACK)
+            screen.blit(level_text, (10, 50))
+        
+        lives_text = font.render(f'Lives: {player.lives}', True, BLACK)
+        screen.blit(lives_text, (10, 130 if in_secret_world else 90))
+        
+        # Show pipe entry hint when near warp pipes
+        near_warp_pipe = False
+        for pipe in pipes:
+            if pipe.is_warp_pipe and player.rect.colliderect(pygame.Rect(pipe.rect.x - 30, pipe.rect.y - 30, pipe.rect.w + 60, pipe.rect.h + 60)):
+                near_warp_pipe = True
+                break
+        
+        if near_warp_pipe and pipe_entry_timer <= 0:
+            if in_secret_world:
+                hint_text = pygame.font.Font(None, 28).render('Press DOWN to return to normal world!', True, YELLOW)
+            else:
+                hint_text = pygame.font.Font(None, 28).render('Press DOWN to enter SECRET WORLD!', True, GOLDEN)
+            screen.blit(hint_text, (WIDTH//2 - hint_text.get_width()//2, HEIGHT - 80))
+        
+        # Show power-up status
+        ui_y_offset = 170 if in_secret_world else 130
+        
+        if player.speed_boost > 0:
+            speed_text = pygame.font.Font(None, 24).render(f'Speed Boost: {player.speed_timer // 60 + 1}s', True, GREEN)
+            screen.blit(speed_text, (10, ui_y_offset))
+        
+        if player.jump_boost < 0:
+            jump_text = pygame.font.Font(None, 24).render(f'Jump Boost: {player.jump_timer // 60 + 1}s', True, BLUE)
+            screen.blit(jump_text, (10, ui_y_offset + 20))
+            
+        if player.is_immune():
+            immune_text = pygame.font.Font(None, 24).render(f'Immune: {player.immunity_timer // 60 + 1}s', True, YELLOW)
+            screen.blit(immune_text, (10, ui_y_offset + 40))
+        
+        # Show boss stage if in boss fight
+        if boss:
+            stage_text = pygame.font.Font(None, 28).render(f'Boss Stage: {boss.stage}/3', True, RED)
+            screen.blit(stage_text, (10, ui_y_offset + 70))
+        
+        # Show music controls
+        controls_text = pygame.font.Font(None, 20).render('Music: +/- Volume, M Mute', True, BLACK)
+        screen.blit(controls_text, (WIDTH - 200, 10))
+        
+        volume_text = pygame.font.Font(None, 20).render(f'Vol: {int(music_volume * 100)}%', True, BLACK)
+        screen.blit(volume_text, (WIDTH - 200, 30))
+            
         pygame.display.flip()
         clock.tick(FPS)
-
     pygame.quit()
     sys.exit()
 
 if __name__ == "__main__":
     main()
+    
