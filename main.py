@@ -1,10 +1,43 @@
 import pygame
 import sys
 import numpy as np
+import os
+import json
 
 # Initialize Pygame
 pygame.init()
 pygame.mixer.init()
+
+# High Score Management
+HIGHSCORE_FILE = "highscore.json"
+
+def load_high_score():
+    """Load the high score from file"""
+    try:
+        if os.path.exists(HIGHSCORE_FILE):
+            with open(HIGHSCORE_FILE, 'r') as f:
+                data = json.load(f)
+                return data.get('high_score', 0)
+    except:
+        pass
+    return 0
+
+def save_high_score(score):
+    """Save the high score to file"""
+    try:
+        data = {'high_score': score}
+        with open(HIGHSCORE_FILE, 'w') as f:
+            json.dump(data, f)
+    except:
+        pass
+
+def update_high_score(current_score):
+    """Check if current score is a new high score and save if it is"""
+    high_score = load_high_score()
+    if current_score > high_score:
+        save_high_score(current_score)
+        return True, current_score
+    return False, high_score
 
 # Load music files
 try:
@@ -13,6 +46,9 @@ try:
 except pygame.error:
     print("Music file not found, continuing without music")
     MUSIC_AVAILABLE = False
+
+# Music state tracking
+current_music_type = "normal"  # "normal" or "boss"
 
 # Constants
 WIDTH, HEIGHT = 800, 600
@@ -117,22 +153,102 @@ def play_sound(sound):
     else:
         print("♪ No sound to play")
 
+def create_boss_music():
+    """Create intense boss fight music using procedural generation"""
+    if not MUSIC_AVAILABLE:
+        return None
+    try:
+        import numpy as np
+        import pygame.sndarray
+        
+        sample_rate = 22050
+        duration = 8.0  # 8-second loop
+        frames = int(duration * sample_rate)
+        
+        # Create intense bass line
+        t = np.linspace(0, duration, frames, False)
+        bass_freq = 65.4  # Low C
+        bass = np.sin(2 * np.pi * bass_freq * t) * 0.3
+        
+        # Add driving drum beat pattern
+        drum_freq = 2.0  # 2 beats per second
+        drum_pattern = np.sin(2 * np.pi * drum_freq * t) * 0.4
+        drum_pattern = np.where(drum_pattern > 0.2, 0.8, 0.0)
+        
+        # Add intense melody
+        melody_freqs = [261.6, 293.7, 329.6, 392.0, 440.0]  # C major scale higher octave
+        melody = np.zeros_like(t)
+        for i, freq in enumerate(melody_freqs):
+            phase_offset = i * duration / len(melody_freqs)
+            melody += np.sin(2 * np.pi * freq * (t + phase_offset)) * 0.15
+        
+        # Add tension with dissonant harmonics
+        tension = np.sin(2 * np.pi * 185.0 * t) * 0.2  # Dissonant frequency
+        
+        # Combine all elements
+        boss_music = bass + drum_pattern + melody + tension
+        
+        # Normalize to prevent clipping
+        boss_music = boss_music / np.max(np.abs(boss_music)) * 0.7
+        
+        # Convert to 16-bit integers
+        boss_music = (boss_music * 32767).astype(np.int16)
+        
+        # Create stereo array
+        stereo_music = np.zeros((frames, 2), dtype=np.int16)
+        stereo_music[:, 0] = boss_music  # Left channel
+        stereo_music[:, 1] = boss_music  # Right channel
+        
+        return pygame.sndarray.make_sound(stereo_music)
+    except:
+        return None
+
 def start_background_music():
     """Start playing background music"""
+    global current_music_type
     if MUSIC_AVAILABLE:
         try:
+            pygame.mixer.music.load("bgm.mp3")
             pygame.mixer.music.play(-1, 0.0)  # Loop indefinitely
             pygame.mixer.music.set_volume(0.15)  # Reduced from 0.3 to 0.15 (50% quieter)
+            current_music_type = "normal"
         except:
             pass
 
+def start_boss_music():
+    """Start playing intense boss fight music"""
+    global current_music_type
+    if MUSIC_AVAILABLE and current_music_type != "boss":
+        try:
+            # Simply increase the volume for boss fights (simpler and more reliable)
+            pygame.mixer.music.set_volume(0.35)  # Much louder for boss intensity
+            current_music_type = "boss"
+            print("Boss music started - volume increased!")  # Debug message
+        except Exception as e:
+            print(f"Error starting boss music: {e}")
+            current_music_type = "boss"
+
 def stop_background_music():
     """Stop background music"""
+    global current_music_type
     if MUSIC_AVAILABLE:
         try:
             pygame.mixer.music.stop()
+            current_music_type = "normal"
         except:
             pass
+
+def return_to_normal_music():
+    """Return to normal background music after boss fight"""
+    global current_music_type
+    if MUSIC_AVAILABLE and current_music_type == "boss":
+        try:
+            pygame.mixer.music.set_volume(0.15)  # Back to normal volume
+            current_music_type = "normal"
+            print("Returned to normal music - volume decreased!")  # Debug message
+        except Exception as e:
+            print(f"Error returning to normal music: {e}")
+            current_music_type = "normal"
 
 def set_music_volume(volume):
     """Set music volume (0.0 to 1.0)"""
@@ -141,6 +257,52 @@ def set_music_volume(volume):
             pygame.mixer.music.set_volume(volume)
         except:
             pass
+
+class Shuttlecock:
+    def __init__(self, x, y, direction, speed=4):
+        self.rect = pygame.Rect(x, y, 12, 20)
+        self.direction = direction  # -1 for left, 1 for right
+        self.speed = speed
+        self.rotation = 0
+        self.gravity = 0.3  # Shuttlecocks fall slowly due to feathers
+        self.vy = -2  # Initial upward velocity
+        
+    def update(self):
+        # Horizontal movement
+        self.rect.x += self.speed * self.direction
+        
+        # Vertical movement with gravity
+        self.vy += self.gravity
+        self.rect.y += self.vy
+        
+        # Rotation for visual effect
+        self.rotation += 5
+        
+        # Remove if off screen or hit ground
+        should_remove = (self.rect.x < -100 or self.rect.x > LEVEL_END_X + 100 or 
+                        self.rect.y > HEIGHT + 50)
+        return should_remove
+    
+    def draw(self, surf, camera_x):
+        # Draw shuttlecock (birdie)
+        screen_x = self.rect.x - camera_x
+        screen_y = self.rect.y
+        
+        # Only draw if on screen
+        if screen_x > -50 and screen_x < WIDTH + 50 and screen_y > -50 and screen_y < HEIGHT + 50:
+            # Feather part (white)
+            pygame.draw.ellipse(surf, WHITE, (int(screen_x), int(screen_y), 12, 8))
+            pygame.draw.ellipse(surf, (240, 240, 240), (int(screen_x + 1), int(screen_y + 1), 10, 6))  # Highlight
+            
+            # Rubber tip (black)
+            pygame.draw.ellipse(surf, BLACK, (int(screen_x + 2), int(screen_y + 8), 8, 12))
+            pygame.draw.ellipse(surf, (60, 60, 60), (int(screen_x + 3), int(screen_y + 9), 6, 10))  # Highlight
+            
+            # Feather lines for detail
+            for i in range(3):
+                line_x = screen_x + 3 + i * 2
+                pygame.draw.line(surf, (200, 200, 200), (int(line_x), int(screen_y + 2)), 
+                               (int(line_x), int(screen_y + 6)), 1)
 
 class Slipper:
     def __init__(self, x, y, target_x=None, target_y=None, speed=6):
@@ -521,6 +683,12 @@ class Enemy:
         else:
             self.platform = plat_rect
         self.enemy_type = enemy_type  # "homework", "chores", "badminton", "shower"
+        
+        # Badminton-specific attributes
+        if self.enemy_type == "badminton":
+            self.shoot_timer = 0
+            self.shoot_cooldown = 120  # 2 seconds at 60 FPS
+            self.shuttlecocks = []
 
     def move(self, platforms):
         self.rect.x += self.speed * self.direction
@@ -530,6 +698,18 @@ class Enemy:
         if self.rect.right >= self.platform.right:
             self.rect.right = self.platform.right
             self.direction = -1
+            
+        # Badminton enemy shooting logic
+        if self.enemy_type == "badminton":
+            self.shoot_timer += 1
+            if self.shoot_timer >= self.shoot_cooldown:
+                self.shoot_timer = 0
+                # Shoot shuttlecock in the direction the enemy is facing
+                shuttlecock = Shuttlecock(self.rect.centerx, self.rect.y - 10, self.direction)
+                self.shuttlecocks.append(shuttlecock)
+            
+            # Update shuttlecocks
+            self.shuttlecocks = [s for s in self.shuttlecocks if not s.update()]
 
     def draw(self, surf, camera_x):
         x = self.rect.x - camera_x
@@ -594,6 +774,10 @@ class Enemy:
             for i in range(4):
                 string_y = y + 5 + i * 3
                 pygame.draw.line(surf, WHITE, (x+10, string_y), (x+24, string_y), 1)
+            
+            # Draw shuttlecocks
+            for shuttlecock in self.shuttlecocks:
+                shuttlecock.draw(surf, camera_x)
                 
         elif self.enemy_type == "shower":
             # Enhanced shower head
@@ -675,6 +859,87 @@ class Platform:
         # Right cap  
         pygame.draw.ellipse(surf, BLUE, (x+w-16, y, 16, h))
         pygame.draw.ellipse(surf, (0, 80, 160), (x+w-14, y+1, 12, h-2))  # Shadow
+
+class MovingPlatform(Platform):
+    def __init__(self, x, y, w, h, move_type="horizontal", distance=100, speed=2):
+        super().__init__(x, y, w, h)
+        self.start_x = x
+        self.start_y = y
+        self.move_type = move_type  # "horizontal", "vertical", or "circular"
+        self.distance = distance  # Maximum distance to move
+        self.speed = speed  # Movement speed
+        self.direction = 1  # 1 or -1 for direction
+        self.angle = 0  # For circular movement
+        
+    def update(self):
+        """Update platform position based on movement type"""
+        if self.move_type == "horizontal":
+            # Move horizontally back and forth
+            self.rect.x += self.speed * self.direction
+            
+            # Reverse direction at boundaries
+            if self.rect.x >= self.start_x + self.distance:
+                self.direction = -1
+                self.rect.x = self.start_x + self.distance
+            elif self.rect.x <= self.start_x:
+                self.direction = 1
+                self.rect.x = self.start_x
+                
+        elif self.move_type == "vertical":
+            # Move vertically up and down
+            self.rect.y += self.speed * self.direction
+            
+            # Reverse direction at boundaries
+            if self.rect.y >= self.start_y + self.distance:
+                self.direction = -1
+                self.rect.y = self.start_y + self.distance
+            elif self.rect.y <= self.start_y:
+                self.direction = 1
+                self.rect.y = self.start_y
+                
+        elif self.move_type == "circular":
+            # Move in a circular pattern
+            self.angle += self.speed * 0.05  # Adjust speed for circular motion
+            radius = self.distance // 2
+            center_x = self.start_x + radius
+            center_y = self.start_y + radius
+            
+            import math
+            self.rect.x = int(center_x + radius * math.cos(self.angle))
+            self.rect.y = int(center_y + radius * math.sin(self.angle))
+    
+    def draw(self, surf, camera_x):
+        # Draw the moving platform with a special visual effect
+        # Call parent draw method first
+        super().draw(surf, camera_x)
+        
+        # Add visual indicators for moving platform
+        x = self.rect.x - camera_x
+        y = self.rect.y
+        w = self.rect.w
+        h = self.rect.h
+        
+        # Add animated arrows or dots to show it's moving
+        if self.move_type == "horizontal":
+            # Draw horizontal arrows
+            pygame.draw.polygon(surf, YELLOW, [
+                (x + w//2 - 8, y - 8), (x + w//2 - 2, y - 5), (x + w//2 - 8, y - 2)
+            ])
+            pygame.draw.polygon(surf, YELLOW, [
+                (x + w//2 + 8, y - 8), (x + w//2 + 2, y - 5), (x + w//2 + 8, y - 2)
+            ])
+        elif self.move_type == "vertical":
+            # Draw vertical arrows
+            pygame.draw.polygon(surf, YELLOW, [
+                (x + w//2 - 3, y - 8), (x + w//2, y - 2), (x + w//2 + 3, y - 8)
+            ])
+            pygame.draw.polygon(surf, YELLOW, [
+                (x + w//2 - 3, y + h + 2), (x + w//2, y + h + 8), (x + w//2 + 3, y + h + 2)
+            ])
+        elif self.move_type == "circular":
+            # Draw circular indicator
+            pygame.draw.circle(surf, YELLOW, (x + w//2, y - 6), 3)
+            pygame.draw.circle(surf, YELLOW, (x + w//2, y - 6), 6, 2)
 
 class Coin:
     def __init__(self, x, y):
@@ -901,11 +1166,11 @@ def create_normal_level(level_num=1):
             Platform(0, HEIGHT - 50, LEVEL_END_X+100, 50),  # Ground
             Platform(250, 450, 100, 20),   # Study desk
             Platform(450, 380, 120, 20),   # Bookshelf
-            Platform(650, 320, 80, 20),    # Homework pile
+            MovingPlatform(650, 320, 80, 20, "vertical", 80, 1),    # Moving homework pile
             Platform(850, 280, 140, 20),   # Teacher's desk
-            Platform(1100, 350, 100, 20),  # More homework
+            MovingPlatform(1100, 350, 100, 20, "horizontal", 120, 2),  # Moving homework platform
             Platform(1350, 420, 120, 20),  # Escape platform
-            Platform(1600, 380, 100, 20),  # Freedom ahead
+            MovingPlatform(1600, 380, 100, 20, "vertical", 60, 1.5),  # Moving freedom platform
             Platform(1850, 320, 120, 20)   # Final stretch
         ]
 
@@ -913,8 +1178,7 @@ def create_normal_level(level_num=1):
             Enemy(270, 450-34, "homework", platforms[1].rect),   # Homework on study desk
             Enemy(470, 380-34, "homework", platforms[2].rect),   # More homework
             Enemy(870, 280-34, "homework", platforms[4].rect),   # Teacher homework
-            Enemy(1120, 350-34, "homework", platforms[5].rect),  # Even more homework
-            Enemy(1370, 420-34, "homework", platforms[6].rect),  # Endless homework
+            Enemy(1370, 420-34, "homework", platforms[6].rect),  # Homework on stable platform
         ]
 
         coins = [
@@ -935,21 +1199,20 @@ def create_normal_level(level_num=1):
         platforms = [
             Platform(0, HEIGHT - 50, LEVEL_END_X+100, 50),  # Ground
             Platform(200, 420, 140, 20),   # Kitchen counter
-            Platform(400, 350, 100, 20),   # Washing machine
+            MovingPlatform(400, 350, 100, 20, "horizontal", 100, 1.5),   # Moving washing machine
             Platform(600, 280, 120, 20),   # Vacuum storage
-            Platform(800, 400, 100, 20),   # Laundry basket
+            MovingPlatform(800, 400, 100, 20, "vertical", 70, 1),   # Moving laundry basket
             Platform(1000, 320, 140, 20),  # Cleaning cabinet
             Platform(1250, 380, 100, 20),  # Mop closet
-            Platform(1450, 300, 120, 20),  # Dish rack
+            MovingPlatform(1450, 300, 120, 20, "horizontal", 80, 2),  # Moving dish rack
             Platform(1700, 420, 140, 20)   # Freedom zone
         ]
 
         enemies = [
             Enemy(220, 420-34, "chores", platforms[1].rect),    # Kitchen chores
-            Enemy(420, 350-34, "chores", platforms[2].rect),    # Laundry chores
-            Enemy(820, 400-34, "chores", platforms[4].rect),    # Cleaning chores
+            Enemy(820, 400-34, "chores", platforms[4].rect),    # Laundry chores (will move with platform)
+            Enemy(1020, 320-34, "chores", platforms[5].rect),   # Cleaning chores
             Enemy(1270, 380-34, "chores", platforms[6].rect),   # More cleaning
-            Enemy(1470, 300-34, "chores", platforms[7].rect)    # Dish washing
         ]
 
         coins = [
@@ -969,20 +1232,20 @@ def create_normal_level(level_num=1):
         platforms = [
             Platform(0, HEIGHT - 50, LEVEL_END_X+100, 50),  # Ground
             Platform(300, 400, 80, 20),    # Starting blocks
-            Platform(480, 320, 100, 20),   # Hurdle 1
+            MovingPlatform(480, 320, 100, 20, "vertical", 60, 1.5),   # Moving hurdle 1
             Platform(680, 240, 80, 20),    # High jump
-            Platform(880, 360, 120, 20),   # Balance beam
+            MovingPlatform(880, 360, 120, 20, "horizontal", 100, 1),   # Moving balance beam
             Platform(1100, 280, 100, 20),  # Vault box
             Platform(1350, 400, 140, 20),  # Finish line platform
-            Platform(1600, 320, 100, 20),  # Victory stand
+            MovingPlatform(1600, 320, 100, 20, "circular", 60, 1),  # Victory stand (circular motion)
             Platform(1800, 380, 120, 20)   # Medal ceremony
         ]
 
         enemies = [
             Enemy(320, 400-34, "badminton", platforms[1].rect), # Forced badminton
-            Enemy(500, 320-34, "badminton", platforms[2].rect), # More badminton
-            Enemy(900, 360-34, "badminton", platforms[4].rect), # Even more badminton
-            Enemy(1120, 280-34, "badminton", platforms[5].rect) # Endless badminton
+            Enemy(700, 240-34, "badminton", platforms[3].rect), # More badminton on stable platform
+            Enemy(1120, 280-34, "badminton", platforms[5].rect), # Badminton on vault box
+            Enemy(1820, 380-34, "badminton", platforms[8].rect) # Final badminton challenge
         ]
 
         coins = [
@@ -1276,12 +1539,21 @@ def main():
 
     player = Player()
     score = 0
+    high_score = load_high_score()  # Load high score at start
     camera_x = 0
     current_level = 1
     boss = None
     mom = None
     music_playing = False
     music_volume = 0.15  # Reduced default volume from 0.3
+    
+    # Nintendo Switch Parts Collection
+    switch_parts = {
+        'left_controller': False,
+        'right_controller': False, 
+        'screen': False
+    }
+    switch_parts_count = 0
     
     # Secret world state
     in_secret_world = False
@@ -1295,15 +1567,20 @@ def main():
     pause_menu_selection = 0  # 0=Resume, 1=Restart, 2=Home
 
     # STORY PAGES as list of strings
-    story_pages = [
-        "In the world of Super Ahaanio, a cheerful boy named Ahaan explores a world filled with awesome friends and mischievous foes.",
-        "Ahaan LOVES gadgets: Nintendo Switch, PS5, Apple Watch, Laptops. He jams on his drums and performs with his rock band.",
-        "He is an energetic sportsman: playing soccer, swimming, basketball, ping-pong, tennis, riding skateboards and rip-sticks, cycling, and more! He enjoys chess and carrom with family, and feasts on his favorite Mediterranean and Italian food.",
-        "But he also faces many challenges: endless homework, chores, parents asking him to study, cleaning his room, forced badminton and showers, and parents yelling like villains!",
-        "On this journey, you help Ahaan collect power-ups (gadgets, music, food, family time) and avoid pesky foes (homework, chores, nagging) as he adventures toward happiness.",
-        "Are you ready to join Ahaan on his adventure? Press SPACE to begin! (Press S anytime to SKIP STORY)"
+    # CUTSCENE STORY SEGMENTS
+    cutscene_segments = [
+        "INTRO_WORLD",
+        "INTRO_AHAAN_INTERESTS", 
+        "INTRO_AHAAN_SPORTS",
+        "INTRO_CHALLENGES",
+        "SWITCH_GAMING",
+        "MOM_APPEARS",
+        "SWITCH_BREAKS",
+        "CHASE_BEGINS",
+        "READY_TO_PLAY"
     ]
     story_page = 0
+    cutscene_timer = 0  # Timer for animations within cutscenes
 
     # Initialize first level
     platforms, enemies, coins, pipes, flag, powerups, mom = create_normal_level(current_level)
@@ -1324,9 +1601,11 @@ def main():
             title = pygame.font.Font(None, 64).render("Super Ahaanio", True, YELLOW)
             prompt = pygame.font.Font(None, 36).render("Press SPACE to Start", True, WHITE)
             story_prompt = pygame.font.Font(None, 28).render("Press ENTER for Story", True, (180,180,255))
-            screen.blit(title, ((WIDTH-title.get_width())//2, HEIGHT//2-70))
-            screen.blit(prompt, ((WIDTH-prompt.get_width())//2, HEIGHT//2))
-            screen.blit(story_prompt, ((WIDTH-story_prompt.get_width())//2, HEIGHT//2+60))
+            high_score_display = pygame.font.Font(None, 32).render(f"High Score: {high_score}", True, GOLDEN)
+            screen.blit(title, ((WIDTH-title.get_width())//2, HEIGHT//2-100))
+            screen.blit(prompt, ((WIDTH-prompt.get_width())//2, HEIGHT//2-20))
+            screen.blit(story_prompt, ((WIDTH-story_prompt.get_width())//2, HEIGHT//2+30))
+            screen.blit(high_score_display, ((WIDTH-high_score_display.get_width())//2, HEIGHT//2+80))
             pygame.display.flip()
             if keys[pygame.K_RETURN]:
                 state = "STORY"
@@ -1338,53 +1617,485 @@ def main():
                 boss = None
                 platforms, enemies, coins, pipes, flag, powerups, mom = create_normal_level(current_level)
                 score = 0
+                switch_parts = {'left_controller': False, 'right_controller': False, 'screen': False}
+                switch_parts_count = 0
                 state = "PLAY"
             clock.tick(FPS)
             continue
         if state == "STORY":
-            # Wrap text for the story, and ensure neat adaptive placement
-            def render_multiline(text, font, color, pos_y, max_width):
-                words = text.replace("\n", " \n ").split(' ')
-                lines = []
-                line = ""
-                for word in words:
-                    future = line + word + " "
-                    if word == "\n":
-                        lines.append(line)
-                        line = ""
-                    elif font.size(future)[0] > max_width:
-                        lines.append(line)
-                        line = word + " "
-                    else:
-                        line = future
-                if line:
-                    lines.append(line)
-                for idx, l in enumerate(lines):
-                    rend = font.render(l.strip(), True, color)
-                    screen.blit(rend, (60, pos_y + idx * (font.get_height() + 3)))
-
-            screen.fill((40,32,60))
-            font = pygame.font.Font(None, 34)
-            # Adaptive width, about 80% of WIDTH
-            page_text = story_pages[story_page]
-            color = YELLOW if story_page != len(story_pages)-1 else (255,255,255)
-            render_multiline(page_text, font, color, 100, int(WIDTH * 0.8))
-            skip = pygame.font.Font(None, 24).render("Press S to skip story", True, WHITE)
-            screen.blit(skip, (WIDTH-240, HEIGHT-34))
+            cutscene_timer += 1
+            current_cutscene = cutscene_segments[story_page]
+            
+            # Common cutscene background
+            screen.fill((20, 20, 40))  # Dark blue background
+            
+            # Add animated stars background
+            import math
+            for i in range(20):
+                star_x = (i * 137 + cutscene_timer) % WIDTH
+                star_y = (i * 89 + cutscene_timer // 2) % HEIGHT
+                star_brightness = int(128 + 127 * math.sin(cutscene_timer * 0.05 + i))
+                pygame.draw.circle(screen, (star_brightness, star_brightness, 255), (star_x, star_y), 2)
+            
+            # Render specific cutscene
+            if current_cutscene == "INTRO_WORLD":
+                # Scene 1: Introduction to Super Ahaanio world
+                title = pygame.font.Font(None, 72).render("Super Ahaanio", True, GOLDEN)
+                subtitle = pygame.font.Font(None, 48).render("The Adventure Begins", True, YELLOW)
+                
+                # Animated world elements
+                bounce = int(10 * math.sin(cutscene_timer * 0.1))
+                
+                # Draw floating platforms
+                for i in range(3):
+                    plat_x = 100 + i * 250 + int(20 * math.sin(cutscene_timer * 0.05 + i))
+                    plat_y = 400 + bounce + i * 20
+                    pygame.draw.rect(screen, BLUE, (plat_x, plat_y, 80, 20))
+                    pygame.draw.rect(screen, (100, 150, 255), (plat_x + 2, plat_y + 2, 76, 16))
+                
+                # Draw Ahaan character
+                ahaan_x = 200 + int(30 * math.sin(cutscene_timer * 0.08))
+                ahaan_y = 350 + bounce
+                pygame.draw.ellipse(screen, SKIN, (ahaan_x, ahaan_y, 30, 40))  # Head
+                pygame.draw.rect(screen, BLUE, (ahaan_x - 5, ahaan_y + 40, 40, 50))  # Body
+                pygame.draw.rect(screen, SKIN, (ahaan_x, ahaan_y + 80, 15, 30))  # Left leg
+                pygame.draw.rect(screen, SKIN, (ahaan_x + 20, ahaan_y + 80, 15, 30))  # Right leg
+                
+                screen.blit(title, ((WIDTH - title.get_width()) // 2, 100))
+                screen.blit(subtitle, ((WIDTH - subtitle.get_width()) // 2, 180))
+                
+                text = pygame.font.Font(None, 36).render("In a world filled with adventure...", True, WHITE)
+                screen.blit(text, ((WIDTH - text.get_width()) // 2, HEIGHT - 150))
+                
+            elif current_cutscene == "INTRO_AHAAN_INTERESTS":
+                # Scene 2: Ahaan's interests and gadgets
+                title = pygame.font.Font(None, 56).render("Meet Ahaan!", True, GOLDEN)
+                screen.blit(title, ((WIDTH - title.get_width()) // 2, 50))
+                
+                # Draw Ahaan in center
+                pygame.draw.ellipse(screen, SKIN, (350, 150, 40, 50))  # Head
+                pygame.draw.rect(screen, GREEN, (345, 200, 50, 60))  # Body
+                pygame.draw.rect(screen, SKIN, (335, 250, 20, 40))  # Left arm
+                pygame.draw.rect(screen, SKIN, (385, 250, 20, 40))  # Right arm
+                pygame.draw.rect(screen, SKIN, (350, 260, 18, 40))  # Left leg
+                pygame.draw.rect(screen, SKIN, (372, 260, 18, 40))  # Right leg
+                
+                # Rotating gadgets around Ahaan
+                gadget_radius = 120
+                center_x, center_y = WIDTH // 2, 220
+                
+                gadgets = [
+                    ("Nintendo Switch", BLUE, RED),
+                    ("PS5", BLACK, WHITE),
+                    ("Drums", (139, 69, 19), (160, 82, 45)),
+                    ("Apple Watch", BLACK, GREEN)
+                ]
+                
+                for i, (name, color1, color2) in enumerate(gadgets):
+                    angle = cutscene_timer * 0.02 + i * (math.pi / 2)
+                    gadget_x = center_x + int(gadget_radius * math.cos(angle))
+                    gadget_y = center_y + int(gadget_radius * math.sin(angle))
+                    
+                    if name == "Nintendo Switch":
+                        pygame.draw.rect(screen, BLACK, (gadget_x - 15, gadget_y - 8, 30, 16))
+                        pygame.draw.rect(screen, color1, (gadget_x - 20, gadget_y - 10, 10, 20))
+                        pygame.draw.rect(screen, color2, (gadget_x + 10, gadget_y - 10, 10, 20))
+                    elif name == "PS5":
+                        pygame.draw.ellipse(screen, color1, (gadget_x - 10, gadget_y - 8, 20, 16))
+                        pygame.draw.circle(screen, color2, (gadget_x, gadget_y), 5)
+                    elif name == "Drums":
+                        pygame.draw.ellipse(screen, color1, (gadget_x - 12, gadget_y - 6, 24, 12))
+                        pygame.draw.ellipse(screen, color2, (gadget_x - 10, gadget_y - 4, 20, 8))
+                    elif name == "Apple Watch":
+                        pygame.draw.rect(screen, color1, (gadget_x - 8, gadget_y - 6, 16, 12))
+                        pygame.draw.rect(screen, color2, (gadget_x - 6, gadget_y - 4, 12, 8))
+                
+                text1 = pygame.font.Font(None, 32).render("He LOVES gadgets and music!", True, WHITE)
+                text2 = pygame.font.Font(None, 28).render("Nintendo Switch • PS5 • Drums • Apple Watch", True, YELLOW)
+                screen.blit(text1, ((WIDTH - text1.get_width()) // 2, HEIGHT - 120))
+                screen.blit(text2, ((WIDTH - text2.get_width()) // 2, HEIGHT - 80))
+                
+            elif current_cutscene == "INTRO_AHAAN_SPORTS":
+                # Scene 3: Ahaan's sports activities
+                title = pygame.font.Font(None, 48).render("Ahaan the Athlete!", True, GOLDEN)
+                screen.blit(title, ((WIDTH - title.get_width()) // 2, 50))
+                
+                # Animated sports equipment
+                sports_y = 200
+                bounce_offset = cutscene_timer * 0.1
+                
+                # Soccer ball
+                ball_x = 100 + int(20 * math.sin(bounce_offset))
+                pygame.draw.circle(screen, WHITE, (ball_x, sports_y), 25)
+                pygame.draw.circle(screen, BLACK, (ball_x, sports_y), 25, 3)
+                for i in range(5):
+                    angle = i * (2 * math.pi / 5)
+                    line_end_x = ball_x + int(20 * math.cos(angle))
+                    line_end_y = sports_y + int(20 * math.sin(angle))
+                    pygame.draw.line(screen, BLACK, (ball_x, sports_y), (line_end_x, line_end_y), 2)
+                
+                # Basketball
+                ball_x = 300 + int(15 * math.sin(bounce_offset + 1))
+                pygame.draw.circle(screen, (255, 140, 0), (ball_x, sports_y), 25)
+                pygame.draw.line(screen, BLACK, (ball_x - 20, sports_y), (ball_x + 20, sports_y), 3)
+                pygame.draw.line(screen, BLACK, (ball_x, sports_y - 20), (ball_x, sports_y + 20), 3)
+                
+                # Swimming pool
+                pool_x = 500 + int(10 * math.sin(bounce_offset + 2))
+                pygame.draw.rect(screen, (0, 150, 255), (pool_x, sports_y, 60, 30))
+                # Water waves
+                for i in range(3):
+                    wave_y = sports_y + 10 + i * 8 + int(5 * math.sin(cutscene_timer * 0.2 + i))
+                    pygame.draw.line(screen, (100, 200, 255), (pool_x + 5, wave_y), (pool_x + 55, wave_y), 2)
+                
+                # Skateboard
+                board_x = 650 + int(25 * math.sin(bounce_offset + 3))
+                pygame.draw.rect(screen, (139, 69, 19), (board_x, sports_y + 10, 40, 8))
+                pygame.draw.circle(screen, BLACK, (board_x + 5, sports_y + 20), 5)
+                pygame.draw.circle(screen, BLACK, (board_x + 35, sports_y + 20), 5)
+                
+                text1 = pygame.font.Font(None, 32).render("He's an energetic sportsman!", True, WHITE)
+                text2 = pygame.font.Font(None, 28).render("Soccer • Basketball • Swimming • Skateboarding", True, YELLOW)
+                screen.blit(text1, ((WIDTH - text1.get_width()) // 2, HEIGHT - 120))
+                screen.blit(text2, ((WIDTH - text2.get_width()) // 2, HEIGHT - 80))
+                
+            elif current_cutscene == "INTRO_CHALLENGES":
+                # Scene 4: The challenges Ahaan faces
+                title = pygame.font.Font(None, 48).render("But Ahaan faces challenges...", True, RED)
+                screen.blit(title, ((WIDTH - title.get_width()) // 2, 50))
+                
+                # Animated challenge icons floating menacingly
+                challenges_y = 200
+                float_offset = cutscene_timer * 0.08
+                
+                # Homework stack
+                homework_x = 100 + int(15 * math.sin(float_offset))
+                for i in range(4):
+                    pygame.draw.rect(screen, WHITE, (homework_x, challenges_y + i * 3, 60, 40))
+                    pygame.draw.rect(screen, BLACK, (homework_x, challenges_y + i * 3, 60, 40), 2)
+                    # Scribbled text lines
+                    for j in range(3):
+                        pygame.draw.line(screen, BLACK, (homework_x + 5, challenges_y + i * 3 + 10 + j * 8), 
+                                       (homework_x + 50, challenges_y + i * 3 + 10 + j * 8), 1)
+                
+                # Chores (mop and bucket)
+                chore_x = 300 + int(20 * math.sin(float_offset + 1))
+                pygame.draw.rect(screen, (100, 50, 0), (chore_x, challenges_y, 8, 60))  # Mop handle
+                pygame.draw.ellipse(screen, (200, 200, 200), (chore_x - 10, challenges_y + 50, 28, 20))  # Mop head
+                pygame.draw.rect(screen, BLUE, (chore_x + 20, challenges_y + 40, 25, 30))  # Bucket
+                
+                # Badminton racket (forced sports)
+                racket_x = 500 + int(12 * math.sin(float_offset + 2))
+                pygame.draw.rect(screen, (139, 69, 19), (racket_x, challenges_y, 6, 40))  # Handle
+                pygame.draw.ellipse(screen, (139, 69, 19), (racket_x - 15, challenges_y - 25, 36, 50))  # Racket head
+                # String pattern
+                for i in range(3):
+                    pygame.draw.line(screen, WHITE, (racket_x - 10, challenges_y - 15 + i * 8), 
+                                   (racket_x + 16, challenges_y - 15 + i * 8), 1)
+                    pygame.draw.line(screen, WHITE, (racket_x - 5 + i * 6, challenges_y - 20), 
+                                   (racket_x - 5 + i * 6, challenges_y + 10), 1)
+                
+                # Shower head
+                shower_x = 650 + int(18 * math.sin(float_offset + 3))
+                pygame.draw.rect(screen, (150, 150, 150), (shower_x, challenges_y, 40, 20))
+                # Water drops
+                for i in range(6):
+                    drop_x = shower_x + 5 + i * 6
+                    for j in range(4):
+                        drop_y = challenges_y + 25 + j * 15 + int(10 * math.sin(cutscene_timer * 0.3 + i + j))
+                        pygame.draw.circle(screen, (0, 150, 255), (drop_x, drop_y), 2)
+                
+                text1 = pygame.font.Font(None, 32).render("Homework, chores, forced badminton, showers...", True, WHITE)
+                text2 = pygame.font.Font(None, 28).render("Parents yelling like villains!", True, RED)
+                screen.blit(text1, ((WIDTH - text1.get_width()) // 2, HEIGHT - 120))
+                screen.blit(text2, ((WIDTH - text2.get_width()) // 2, HEIGHT - 80))
+                
+            elif current_cutscene == "SWITCH_GAMING":
+                # Scene 5: Ahaan gaming peacefully
+                title = pygame.font.Font(None, 48).render("One peaceful day...", True, GREEN)
+                screen.blit(title, ((WIDTH - title.get_width()) // 2, 50))
+                
+                # Room background
+                pygame.draw.rect(screen, (100, 80, 60), (50, 150, WIDTH - 100, HEIGHT - 200))  # Room
+                pygame.draw.rect(screen, (80, 60, 40), (50, 150, WIDTH - 100, HEIGHT - 200), 5)  # Room border
+                
+                # Ahaan sitting and gaming
+                ahaan_x, ahaan_y = WIDTH // 2 - 20, 250
+                pygame.draw.ellipse(screen, SKIN, (ahaan_x, ahaan_y, 40, 50))  # Head
+                pygame.draw.rect(screen, BLUE, (ahaan_x - 10, ahaan_y + 50, 60, 70))  # Body sitting
+                pygame.draw.rect(screen, SKIN, (ahaan_x - 5, ahaan_y + 110, 25, 40))  # Left leg
+                pygame.draw.rect(screen, SKIN, (ahaan_x + 30, ahaan_y + 110, 25, 40))  # Right leg
+                
+                # Nintendo Switch in hands with animated screen
+                switch_x, switch_y = ahaan_x + 10, ahaan_y + 80
+                pygame.draw.rect(screen, BLACK, (switch_x, switch_y, 40, 25))  # Switch body
+                pygame.draw.rect(screen, BLUE, (switch_x - 8, switch_y + 3, 12, 20))  # Left Joy-Con
+                pygame.draw.rect(screen, RED, (switch_x + 36, switch_y + 3, 12, 20))  # Right Joy-Con
+                
+                # Animated screen content
+                screen_color = [GREEN, YELLOW, BLUE, RED][int(cutscene_timer / 30) % 4]
+                pygame.draw.rect(screen, screen_color, (switch_x + 3, switch_y + 3, 34, 19))
+                
+                # Happy expression
+                # Eyes
+                pygame.draw.circle(screen, BLACK, (ahaan_x + 12, ahaan_y + 18), 3)
+                pygame.draw.circle(screen, BLACK, (ahaan_x + 28, ahaan_y + 18), 3)
+                # Smile
+                pygame.draw.arc(screen, BLACK, (ahaan_x + 8, ahaan_y + 25, 24, 15), 0, math.pi, 3)
+                
+                text1 = pygame.font.Font(None, 36).render("Ahaan was gaming on his Nintendo Switch", True, WHITE)
+                text2 = pygame.font.Font(None, 32).render("Peaceful and happy...", True, GREEN)
+                screen.blit(text1, ((WIDTH - text1.get_width()) // 2, HEIGHT - 120))
+                screen.blit(text2, ((WIDTH - text2.get_width()) // 2, HEIGHT - 80))
+                
+            elif current_cutscene == "MOM_APPEARS":
+                # Scene 6: Mom suddenly appears
+                title = pygame.font.Font(None, 48).render("Suddenly...", True, RED)
+                screen.blit(title, ((WIDTH - title.get_width()) // 2, 50))
+                
+                # Room background (same as before)
+                pygame.draw.rect(screen, (100, 80, 60), (50, 150, WIDTH - 100, HEIGHT - 200))
+                pygame.draw.rect(screen, (80, 60, 40), (50, 150, WIDTH - 100, HEIGHT - 200), 5)
+                
+                # Ahaan (now scared)
+                ahaan_x, ahaan_y = WIDTH // 2 - 20, 250
+                pygame.draw.ellipse(screen, SKIN, (ahaan_x, ahaan_y, 40, 50))  # Head
+                pygame.draw.rect(screen, BLUE, (ahaan_x - 10, ahaan_y + 50, 60, 70))  # Body
+                
+                # Scared expression
+                pygame.draw.circle(screen, BLACK, (ahaan_x + 10, ahaan_y + 15), 4)  # Wide eyes
+                pygame.draw.circle(screen, BLACK, (ahaan_x + 30, ahaan_y + 15), 4)
+                pygame.draw.ellipse(screen, BLACK, (ahaan_x + 15, ahaan_y + 30, 10, 8))  # Open mouth
+                
+                # Mom appearing with dramatic effect
+                mom_entrance = min(cutscene_timer / 60.0, 1.0)
+                mom_x = int(100 - 50 + mom_entrance * 50)
+                mom_y = 200
+                
+                # Mom character (larger and more imposing)
+                pygame.draw.ellipse(screen, SKIN, (mom_x, mom_y, 50, 60))  # Head
+                pygame.draw.rect(screen, (200, 100, 100), (mom_x - 10, mom_y + 60, 70, 90))  # Body
+                pygame.draw.rect(screen, SKIN, (mom_x - 15, mom_y + 130, 30, 50))  # Left leg
+                pygame.draw.rect(screen, SKIN, (mom_x + 55, mom_y + 130, 30, 50))  # Right leg
+                
+                # Angry expression
+                pygame.draw.line(screen, BLACK, (mom_x + 15, mom_y + 20), (mom_x + 20, mom_y + 25), 3)  # Angry eyebrow
+                pygame.draw.line(screen, BLACK, (mom_x + 35, mom_y + 25), (mom_x + 40, mom_y + 20), 3)
+                pygame.draw.circle(screen, BLACK, (mom_x + 18, mom_y + 30), 3)  # Eyes
+                pygame.draw.circle(screen, BLACK, (mom_x + 37, mom_y + 30), 3)
+                pygame.draw.arc(screen, BLACK, (mom_x + 15, mom_y + 40, 20, 10), math.pi, 2 * math.pi, 3)  # Frown
+                
+                # Speech bubble with text
+                if cutscene_timer > 60:
+                    bubble_x, bubble_y = mom_x + 60, mom_y - 20
+                    pygame.draw.ellipse(screen, WHITE, (bubble_x, bubble_y, 200, 60))
+                    pygame.draw.ellipse(screen, BLACK, (bubble_x, bubble_y, 200, 60), 3)
+                    
+                    text = pygame.font.Font(None, 28).render("No more games!", True, RED)
+                    text2 = pygame.font.Font(None, 24).render("You have homework!", True, BLACK)
+                    screen.blit(text, (bubble_x + 10, bubble_y + 10))
+                    screen.blit(text2, (bubble_x + 10, bubble_y + 35))
+                
+                # Action lines for dramatic effect
+                for i in range(8):
+                    line_angle = i * (2 * math.pi / 8) + cutscene_timer * 0.1
+                    line_x = mom_x + 25 + int(80 * math.cos(line_angle))
+                    line_y = mom_y + 75 + int(80 * math.sin(line_angle))
+                    end_x = mom_x + 25 + int(100 * math.cos(line_angle))
+                    end_y = mom_y + 75 + int(100 * math.sin(line_angle))
+                    pygame.draw.line(screen, YELLOW, (line_x, line_y), (end_x, end_y), 2)
+                
+                instruction = pygame.font.Font(None, 32).render("Mom suddenly appears!", True, WHITE)
+                screen.blit(instruction, ((WIDTH - instruction.get_width()) // 2, HEIGHT - 100))
+                
+            elif current_cutscene == "SWITCH_BREAKS":
+                # Scene 7: Nintendo Switch breaks apart
+                title = pygame.font.Font(None, 48).render("OH NO!", True, RED)
+                screen.blit(title, ((WIDTH - title.get_width()) // 2, 50))
+                
+                # Mom running away with pieces
+                mom_x = 150 + int(cutscene_timer * 2)
+                mom_y = 200
+                
+                if mom_x < WIDTH:
+                    # Mom character running
+                    pygame.draw.ellipse(screen, SKIN, (mom_x, mom_y, 40, 50))  # Head
+                    pygame.draw.rect(screen, (200, 100, 100), (mom_x - 5, mom_y + 50, 50, 70))  # Body
+                    
+                    # Running legs animation
+                    leg_offset = int(10 * math.sin(cutscene_timer * 0.3))
+                    pygame.draw.rect(screen, SKIN, (mom_x + 5, mom_y + 120, 15, 40 + leg_offset))  # Left leg
+                    pygame.draw.rect(screen, SKIN, (mom_x + 25, mom_y + 120, 15, 40 - leg_offset))  # Right leg
+                    
+                    # Movement lines
+                    for i in range(3):
+                        line_x = mom_x - 20 - i * 10
+                        pygame.draw.line(screen, WHITE, (line_x, mom_y + 60 + i * 5), (line_x + 15, mom_y + 65 + i * 5), 2)
+                
+                # Nintendo Switch pieces flying apart
+                explosion_progress = cutscene_timer / 120.0
+                center_x, center_y = WIDTH // 2, HEIGHT // 2
+                
+                # Left controller flying
+                left_x = center_x - int(150 * explosion_progress) - 50
+                left_y = center_y - int(100 * explosion_progress)
+                pygame.draw.rect(screen, BLUE, (left_x, left_y, 25, 40))
+                pygame.draw.circle(screen, BLACK, (left_x + 12, left_y + 15), 5)
+                
+                # Screen piece
+                screen_x = center_x - 30
+                screen_y = center_y - int(80 * explosion_progress)
+                pygame.draw.rect(screen, BLACK, (screen_x, screen_y, 60, 35))
+                pygame.draw.rect(screen, (100, 100, 100), (screen_x + 3, screen_y + 3, 54, 29))
+                
+                # Right controller flying
+                right_x = center_x + int(150 * explosion_progress) + 25
+                right_y = center_y - int(120 * explosion_progress)
+                pygame.draw.rect(screen, RED, (right_x, right_y, 25, 40))
+                pygame.draw.circle(screen, BLACK, (right_x + 12, right_y + 15), 5)
+                
+                # Explosion effect
+                if explosion_progress < 0.5:
+                    for i in range(12):
+                        spark_angle = i * (2 * math.pi / 12)
+                        spark_dist = int(60 * explosion_progress)
+                        spark_x = center_x + int(spark_dist * math.cos(spark_angle))
+                        spark_y = center_y + int(spark_dist * math.sin(spark_angle))
+                        pygame.draw.circle(screen, YELLOW, (spark_x, spark_y), 3)
+                
+                text1 = pygame.font.Font(None, 36).render("The Nintendo Switch breaks apart!", True, WHITE)
+                text2 = pygame.font.Font(None, 32).render("Three pieces scattered!", True, RED)
+                screen.blit(text1, ((WIDTH - text1.get_width()) // 2, HEIGHT - 120))
+                screen.blit(text2, ((WIDTH - text2.get_width()) // 2, HEIGHT - 80))
+                
+            elif current_cutscene == "CHASE_BEGINS":
+                # Scene 8: The chase begins
+                title = pygame.font.Font(None, 48).render("The Chase is On!", True, GOLDEN)
+                screen.blit(title, ((WIDTH - title.get_width()) // 2, 50))
+                
+                # Ahaan running
+                ahaan_x = 100 + int(cutscene_timer * 1.5)
+                ahaan_y = 250
+                
+                # Running animation
+                pygame.draw.ellipse(screen, SKIN, (ahaan_x, ahaan_y, 35, 45))  # Head
+                pygame.draw.rect(screen, BLUE, (ahaan_x - 5, ahaan_y + 45, 45, 60))  # Body
+                
+                # Animated running legs
+                leg_cycle = cutscene_timer * 0.4
+                left_leg_offset = int(15 * math.sin(leg_cycle))
+                right_leg_offset = int(15 * math.sin(leg_cycle + math.pi))
+                
+                pygame.draw.rect(screen, SKIN, (ahaan_x + 5, ahaan_y + 105, 12, 35 + left_leg_offset))
+                pygame.draw.rect(screen, SKIN, (ahaan_x + 23, ahaan_y + 105, 12, 35 + right_leg_offset))
+                
+                # Arms pumping
+                arm_cycle = cutscene_timer * 0.4
+                left_arm_y = ahaan_y + 55 + int(10 * math.sin(arm_cycle))
+                right_arm_y = ahaan_y + 55 + int(10 * math.sin(arm_cycle + math.pi))
+                
+                pygame.draw.rect(screen, SKIN, (ahaan_x - 15, left_arm_y, 15, 25))  # Left arm
+                pygame.draw.rect(screen, SKIN, (ahaan_x + 35, right_arm_y, 15, 25))  # Right arm
+                
+                # Determined expression
+                pygame.draw.circle(screen, BLACK, (ahaan_x + 12, ahaan_y + 18), 3)  # Eyes
+                pygame.draw.circle(screen, BLACK, (ahaan_x + 23, ahaan_y + 18), 3)
+                pygame.draw.line(screen, BLACK, (ahaan_x + 10, ahaan_y + 30), (ahaan_x + 25, ahaan_y + 30), 3)  # Determined mouth
+                
+                # Speed lines
+                for i in range(5):
+                    line_x = ahaan_x - 30 - i * 15
+                    pygame.draw.line(screen, WHITE, (line_x, ahaan_y + 60 + i * 8), (line_x + 20, ahaan_y + 65 + i * 8), 3)
+                
+                # Floating Nintendo Switch parts in the distance
+                for i, (color, offset_x, offset_y) in enumerate([(BLUE, -80, -30), (BLACK, 0, -50), (RED, 80, -20)]):
+                    part_x = ahaan_x + 200 + offset_x + int(20 * math.sin(cutscene_timer * 0.1 + i))
+                    part_y = 180 + offset_y + int(15 * math.cos(cutscene_timer * 0.1 + i))
+                    
+                    if color == BLACK:  # Screen
+                        pygame.draw.rect(screen, color, (part_x, part_y, 30, 20))
+                        pygame.draw.rect(screen, (100, 100, 100), (part_x + 2, part_y + 2, 26, 16))
+                    else:  # Controllers
+                        pygame.draw.rect(screen, color, (part_x, part_y, 15, 25))
+                        pygame.draw.circle(screen, BLACK, (part_x + 7, part_y + 10), 3)
+                
+                text1 = pygame.font.Font(None, 36).render("Ahaan must collect all three pieces!", True, WHITE)
+                text2 = pygame.font.Font(None, 32).render("Defeat mom bosses to get them back!", True, YELLOW)
+                screen.blit(text1, ((WIDTH - text1.get_width()) // 2, HEIGHT - 120))
+                screen.blit(text2, ((WIDTH - text2.get_width()) // 2, HEIGHT - 80))
+                
+            elif current_cutscene == "READY_TO_PLAY":
+                # Scene 9: Ready to start the adventure
+                title = pygame.font.Font(None, 56).render("Are You Ready?", True, GOLDEN)
+                screen.blit(title, ((WIDTH - title.get_width()) // 2, 100))
+                
+                # Large Ahaan character in hero pose
+                ahaan_x, ahaan_y = WIDTH // 2 - 25, 200
+                
+                # Hero pose
+                pygame.draw.ellipse(screen, SKIN, (ahaan_x, ahaan_y, 50, 60))  # Head
+                pygame.draw.rect(screen, BLUE, (ahaan_x - 10, ahaan_y + 60, 70, 80))  # Body
+                pygame.draw.rect(screen, SKIN, (ahaan_x - 20, ahaan_y + 80, 20, 40))  # Left arm (raised)
+                pygame.draw.rect(screen, SKIN, (ahaan_x + 70, ahaan_y + 90, 20, 40))  # Right arm
+                pygame.draw.rect(screen, SKIN, (ahaan_x + 10, ahaan_y + 140, 15, 50))  # Left leg
+                pygame.draw.rect(screen, SKIN, (ahaan_x + 35, ahaan_y + 140, 15, 50))  # Right leg
+                
+                # Confident expression
+                pygame.draw.circle(screen, BLACK, (ahaan_x + 18, ahaan_y + 25), 4)  # Eyes
+                pygame.draw.circle(screen, BLACK, (ahaan_x + 32, ahaan_y + 25), 4)
+                pygame.draw.arc(screen, BLACK, (ahaan_x + 15, ahaan_y + 35, 20, 15), 0, math.pi, 4)  # Smile
+                
+                # Glowing aura effect
+                aura_radius = 80 + int(20 * math.sin(cutscene_timer * 0.1))
+                for radius in range(aura_radius, aura_radius - 30, -5):
+                    alpha = max(0, 255 - (aura_radius - radius) * 8)
+                    color = (255, 215, 0, alpha // 4)  # Golden color with transparency effect
+                    pygame.draw.circle(screen, (255, 215, 0), (ahaan_x + 25, ahaan_y + 100), radius, 2)
+                
+                # Floating Nintendo Switch parts around him
+                for i in range(3):
+                    angle = cutscene_timer * 0.05 + i * (2 * math.pi / 3)
+                    orbit_x = ahaan_x + 25 + int(60 * math.cos(angle))
+                    orbit_y = ahaan_y + 100 + int(40 * math.sin(angle))
+                    
+                    if i == 0:  # Left controller
+                        pygame.draw.rect(screen, BLUE, (orbit_x, orbit_y, 20, 30))
+                        pygame.draw.circle(screen, BLACK, (orbit_x + 10, orbit_y + 12), 4)
+                    elif i == 1:  # Screen
+                        pygame.draw.rect(screen, BLACK, (orbit_x, orbit_y, 35, 25))
+                        pygame.draw.rect(screen, (100, 255, 100), (orbit_x + 3, orbit_y + 3, 29, 19))
+                    else:  # Right controller
+                        pygame.draw.rect(screen, RED, (orbit_x, orbit_y, 20, 30))
+                        pygame.draw.circle(screen, BLACK, (orbit_x + 10, orbit_y + 12), 4)
+                
+                subtitle = pygame.font.Font(None, 40).render("Help Ahaan get his Nintendo Switch back!", True, WHITE)
+                instruction1 = pygame.font.Font(None, 32).render("Press SPACE to begin the adventure!", True, YELLOW)
+                instruction2 = pygame.font.Font(None, 24).render("(Press S to skip story)", True, (150, 150, 150))
+                
+                screen.blit(subtitle, ((WIDTH - subtitle.get_width()) // 2, HEIGHT - 150))
+                screen.blit(instruction1, ((WIDTH - instruction1.get_width()) // 2, HEIGHT - 100))
+                screen.blit(instruction2, ((WIDTH - instruction2.get_width()) // 2, HEIGHT - 60))
+            
+            # Common controls for all cutscenes
+            controls = pygame.font.Font(None, 24).render("SPACE: Next | S: Skip Story", True, WHITE)
+            screen.blit(controls, (10, HEIGHT - 30))
+            
             pygame.display.flip()
             
-            # Debounce space key: advance only on new press
+            # Handle input
             if not hasattr(main, 'story_last_space'):
                 main.story_last_space = False
             if keys[pygame.K_SPACE]:
                 if not main.story_last_space:
-                    if story_page < len(story_pages)-1:
+                    if story_page < len(cutscene_segments) - 1:
                         story_page += 1
+                        cutscene_timer = 0  # Reset timer for next cutscene
                     else:
                         state = "PLAY"
                 main.story_last_space = True
             else:
                 main.story_last_space = False
+                
             if keys[pygame.K_s]:
                 # Reset player and level when skipping story
                 player.__init__()
@@ -1392,20 +2103,35 @@ def main():
                 boss = None
                 platforms, enemies, coins, pipes, flag, powerups, mom = create_normal_level(current_level)
                 score = 0
+                switch_parts = {'left_controller': False, 'right_controller': False, 'screen': False}
+                switch_parts_count = 0
                 state = "PLAY"
             clock.tick(FPS)
             continue
         if state == "GAMEOVER":
             play_sound(GAME_OVER_SOUND)
+            
+            # Check for new high score
+            is_new_high_score, current_high_score = update_high_score(score)
+            high_score = current_high_score
+            
             screen.fill(BLACK)
             msg = pygame.font.Font(None, 64).render("Game Over!", True, RED)
             score_display = pygame.font.Font(None, 36).render(f"Score: {score}", True, YELLOW)
             level_display = pygame.font.Font(None, 36).render(f"Level: {current_level}", True, WHITE)
+            high_score_display = pygame.font.Font(None, 36).render(f"High Score: {high_score}", True, GOLDEN)
             prompt = pygame.font.Font(None, 36).render("Press SPACE to Restart", True, WHITE)
+            
+            # Show "NEW HIGH SCORE!" message if applicable
+            if is_new_high_score:
+                new_record_msg = pygame.font.Font(None, 48).render("NEW HIGH SCORE!", True, GOLDEN)
+                screen.blit(new_record_msg, ((WIDTH-new_record_msg.get_width())//2, HEIGHT//2-120))
+            
             screen.blit(msg, ((WIDTH-msg.get_width())//2, HEIGHT//2-70))
             screen.blit(score_display, ((WIDTH-score_display.get_width())//2, HEIGHT//2-20))
-            screen.blit(level_display, ((WIDTH-level_display.get_width())//2, HEIGHT//2+20))
-            screen.blit(prompt, ((WIDTH-prompt.get_width())//2, HEIGHT//2+70))
+            screen.blit(high_score_display, ((WIDTH-high_score_display.get_width())//2, HEIGHT//2+10))
+            screen.blit(level_display, ((WIDTH-level_display.get_width())//2, HEIGHT//2+40))
+            screen.blit(prompt, ((WIDTH-prompt.get_width())//2, HEIGHT//2+90))
             pygame.display.flip()
             if keys[pygame.K_SPACE]:
                 player.__init__()
@@ -1414,22 +2140,26 @@ def main():
                 platforms, enemies, coins, pipes, flag, powerups, mom = create_normal_level(current_level)
                 state = "PLAY"
                 score = 0
+                switch_parts = {'left_controller': False, 'right_controller': False, 'screen': False}
+                switch_parts_count = 0
             clock.tick(FPS)
             continue
         if state == "COMPLETE":
             play_sound(LEVEL_COMPLETE_SOUND)
             screen.fill(BLACK)
-            if current_level % 5 == 0:
+            if current_level % 3 == 0:
                 msg = pygame.font.Font(None, 64).render("Boss Defeated!", True, YELLOW)
             else:
                 msg = pygame.font.Font(None, 64).render("Level Complete!", True, YELLOW)
             score_display = pygame.font.Font(None, 36).render(f"Score: {score}", True, GOLDEN)
             level_display = pygame.font.Font(None, 36).render(f"Level: {current_level}", True, WHITE)
+            high_score_display = pygame.font.Font(None, 32).render(f"High Score: {high_score}", True, GOLDEN)
             prompt = pygame.font.Font(None, 36).render("Press SPACE for Next Level", True, WHITE)
             screen.blit(msg, ((WIDTH-msg.get_width())//2, HEIGHT//2-70))
             screen.blit(score_display, ((WIDTH-score_display.get_width())//2, HEIGHT//2-20))
-            screen.blit(level_display, ((WIDTH-level_display.get_width())//2, HEIGHT//2+20))
-            screen.blit(prompt, ((WIDTH-prompt.get_width())//2, HEIGHT//2+70))
+            screen.blit(level_display, ((WIDTH-level_display.get_width())//2, HEIGHT//2+10))
+            screen.blit(high_score_display, ((WIDTH-high_score_display.get_width())//2, HEIGHT//2+40))
+            screen.blit(prompt, ((WIDTH-prompt.get_width())//2, HEIGHT//2+80))
             pygame.display.flip()
             if keys[pygame.K_SPACE]:
                 # Save power-up state before resetting player
@@ -1453,19 +2183,212 @@ def main():
                 current_level += 1
                 
                 # Check if next level is a boss level
-                if current_level % 5 == 0:
-                    boss_level = current_level // 5
+                if current_level % 3 == 0:
+                    print(f"Entering boss level {current_level}!")  # Debug message
+                    boss_level = current_level // 3
                     platforms, enemies, coins, pipes, flag, powerups, boss = create_boss_level(boss_level)
                     mom = None  # No mom in boss levels
-                    # Lower music volume for boss fights to hear sound effects better
-                    set_music_volume(0.08)  # Even quieter for boss fights
+                    # Start intense boss music
+                    start_boss_music()
                 else:
+                    print(f"Entering normal level {current_level}")  # Debug message
                     boss = None
                     platforms, enemies, coins, pipes, flag, powerups, mom = create_normal_level(current_level)
-                    # Normal volume for regular levels
-                    set_music_volume(0.15)  # Reduced from 0.3
+                    # Return to normal music for regular levels
+                    return_to_normal_music()
                 
                 state = "PLAY"
+            clock.tick(FPS)
+            continue
+
+        # --- Nintendo Switch Cutscenes ---
+        if state == "CUTSCENE_LEFT_CONTROLLER":
+            screen.fill(BLACK)
+            
+            # Draw cutscene for getting left controller
+            title = pygame.font.Font(None, 64).render("You got the Left Controller!", True, BLUE)
+            story1 = pygame.font.Font(None, 36).render("Ahaan defeats Mom and grabs the left Joy-Con!", True, WHITE)
+            story2 = pygame.font.Font(None, 36).render("'One piece down, two to go!' he says.", True, WHITE)
+            story3 = pygame.font.Font(None, 32).render("Press SPACE to continue the chase!", True, YELLOW)
+            
+            # Draw Nintendo Switch left controller
+            pygame.draw.rect(screen, BLUE, (350, 200, 30, 100))
+            pygame.draw.circle(screen, BLACK, (365, 220), 8)
+            pygame.draw.rect(screen, (100, 100, 100), (360, 250, 10, 20))
+            
+            screen.blit(title, ((WIDTH-title.get_width())//2, HEIGHT//2-100))
+            screen.blit(story1, ((WIDTH-story1.get_width())//2, HEIGHT//2-50))
+            screen.blit(story2, ((WIDTH-story2.get_width())//2, HEIGHT//2-10))
+            screen.blit(story3, ((WIDTH-story3.get_width())//2, HEIGHT//2+50))
+            
+            pygame.display.flip()
+            if keys[pygame.K_SPACE]:
+                state = "COMPLETE"
+            clock.tick(FPS)
+            continue
+            
+        if state == "CUTSCENE_RIGHT_CONTROLLER":
+            screen.fill(BLACK)
+            
+            # Draw cutscene for getting right controller  
+            title = pygame.font.Font(None, 64).render("You got the Right Controller!", True, RED)
+            story1 = pygame.font.Font(None, 36).render("Ahaan defeats Mom again and grabs the right Joy-Con!", True, WHITE)
+            story2 = pygame.font.Font(None, 36).render("'Just the screen left!' he exclaims.", True, WHITE)
+            story3 = pygame.font.Font(None, 32).render("Press SPACE to continue the final chase!", True, YELLOW)
+            
+            # Draw Nintendo Switch right controller
+            pygame.draw.rect(screen, RED, (420, 200, 30, 100))
+            pygame.draw.circle(screen, BLACK, (435, 220), 8)
+            pygame.draw.rect(screen, (100, 100, 100), (430, 250, 10, 20))
+            
+            screen.blit(title, ((WIDTH-title.get_width())//2, HEIGHT//2-100))
+            screen.blit(story1, ((WIDTH-story1.get_width())//2, HEIGHT//2-50))
+            screen.blit(story2, ((WIDTH-story2.get_width())//2, HEIGHT//2-10))
+            screen.blit(story3, ((WIDTH-story3.get_width())//2, HEIGHT//2+50))
+            
+            pygame.display.flip()
+            if keys[pygame.K_SPACE]:
+                state = "COMPLETE"
+            clock.tick(FPS)
+            continue
+            
+        if state == "CUTSCENE_SCREEN":
+            screen.fill(BLACK)
+            
+            # Check if all parts are collected
+            if switch_parts_count >= 3:
+                # Final victory cutscene
+                title = pygame.font.Font(None, 64).render("Nintendo Switch Complete!", True, GREEN)
+                story1 = pygame.font.Font(None, 36).render("Ahaan defeats Mom one last time and gets the screen!", True, WHITE)
+                story2 = pygame.font.Font(None, 36).render("He quickly assembles his Nintendo Switch and runs away!", True, WHITE)
+                story3 = pygame.font.Font(None, 32).render("Press SPACE to see the ending!", True, YELLOW)
+                
+                # Draw complete Nintendo Switch
+                pygame.draw.rect(screen, BLUE, (350, 200, 30, 100))    # Left controller
+                pygame.draw.rect(screen, BLACK, (380, 210, 80, 80))    # Screen
+                pygame.draw.rect(screen, (100, 100, 100), (385, 215, 70, 70))  # Screen interior
+                pygame.draw.rect(screen, RED, (460, 200, 30, 100))     # Right controller
+                
+                # Add joy-con details
+                pygame.draw.circle(screen, BLACK, (365, 220), 6)
+                pygame.draw.circle(screen, BLACK, (475, 220), 6)
+                
+                state_after_space = "VICTORY_CUTSCENE"
+            else:
+                title = pygame.font.Font(None, 64).render("You got the Screen!", True, GREEN)
+                story1 = pygame.font.Font(None, 36).render("Ahaan gets the final piece - the screen!", True, WHITE)
+                story2 = pygame.font.Font(None, 36).render("But something's wrong... more challenges await!", True, WHITE)
+                story3 = pygame.font.Font(None, 32).render("Press SPACE to continue!", True, YELLOW)
+                
+                # Draw just the screen
+                pygame.draw.rect(screen, BLACK, (360, 210, 80, 80))
+                pygame.draw.rect(screen, (100, 100, 100), (365, 215, 70, 70))
+                
+                state_after_space = "COMPLETE"
+            
+            screen.blit(title, ((WIDTH-title.get_width())//2, HEIGHT//2-100))
+            screen.blit(story1, ((WIDTH-story1.get_width())//2, HEIGHT//2-50))
+            screen.blit(story2, ((WIDTH-story2.get_width())//2, HEIGHT//2-10))
+            screen.blit(story3, ((WIDTH-story3.get_width())//2, HEIGHT//2+50))
+            
+            pygame.display.flip()
+            if keys[pygame.K_SPACE]:
+                state = state_after_space
+            clock.tick(FPS)
+            continue
+            
+        if state == "VICTORY_CUTSCENE":
+            screen.fill(BLACK)
+            
+            title = pygame.font.Font(None, 72).render("Victory!", True, GOLDEN)
+            story1 = pygame.font.Font(None, 40).render("Ahaan assembles his Nintendo Switch and runs away!", True, WHITE)
+            story2 = pygame.font.Font(None, 40).render("'Freedom at last!' he shouts with joy!", True, WHITE)
+            story3 = pygame.font.Font(None, 32).render("Press SPACE for final congratulations!", True, YELLOW)
+            
+            # Draw Ahaan running away with complete Nintendo Switch (simple representation)
+            # Ahaan
+            pygame.draw.ellipse(screen, SKIN, (250, 250, 40, 50))  # Head
+            pygame.draw.rect(screen, BLUE, (245, 300, 50, 60))     # Body
+            pygame.draw.rect(screen, SKIN, (235, 350, 20, 40))     # Left leg
+            pygame.draw.rect(screen, SKIN, (275, 350, 20, 40))     # Right leg
+            
+            # Nintendo Switch in his hands
+            pygame.draw.rect(screen, BLACK, (320, 320, 60, 40))    # Switch body
+            pygame.draw.rect(screen, BLUE, (315, 325, 15, 30))     # Left Joy-Con
+            pygame.draw.rect(screen, RED, (385, 325, 15, 30))      # Right Joy-Con
+            
+            # Movement lines
+            for i in range(5):
+                pygame.draw.line(screen, WHITE, (200-i*10, 280+i*5), (230-i*10, 285+i*5), 2)
+            
+            screen.blit(title, ((WIDTH-title.get_width())//2, HEIGHT//2-150))
+            screen.blit(story1, ((WIDTH-story1.get_width())//2, HEIGHT//2+100))
+            screen.blit(story2, ((WIDTH-story2.get_width())//2, HEIGHT//2+140))
+            screen.blit(story3, ((WIDTH-story3.get_width())//2, HEIGHT//2+180))
+            
+            pygame.display.flip()
+            if keys[pygame.K_SPACE]:
+                state = "CONGRATULATIONS"
+            clock.tick(FPS)
+            continue
+            
+        if state == "CONGRATULATIONS":
+            screen.fill(BLACK)
+            
+            # Create a celebratory screen
+            import math
+            import time
+            celebration_timer = time.time() * 2
+            
+            # Animated congratulations text with rainbow effect
+            title = "Congratulations!"
+            title_font = pygame.font.Font(None, 96)
+            
+            for i, letter in enumerate(title):
+                # Rainbow color effect
+                r = int(128 + 127 * math.sin(celebration_timer + i * 0.5))
+                g = int(128 + 127 * math.sin(celebration_timer + i * 0.5 + 2))
+                b = int(128 + 127 * math.sin(celebration_timer + i * 0.5 + 4))
+                
+                # Bouncing letters
+                bounce = int(10 * math.sin(celebration_timer * 2 + i * 0.3))
+                
+                letter_surface = title_font.render(letter, True, (r, g, b))
+                letter_x = (WIDTH - len(title) * 45) // 2 + i * 55
+                letter_y = HEIGHT // 2 - 100 + bounce
+                screen.blit(letter_surface, (letter_x, letter_y))
+            
+            # Final messages
+            msg1 = pygame.font.Font(None, 48).render("Ahaan has his Nintendo Switch back!", True, WHITE)
+            msg2 = pygame.font.Font(None, 36).render(f"Final Score: {score}", True, GOLDEN)
+            msg3 = pygame.font.Font(None, 36).render(f"High Score: {high_score}", True, GOLDEN)
+            msg4 = pygame.font.Font(None, 32).render("Thanks for playing Super Ahaanio!", True, YELLOW)
+            msg5 = pygame.font.Font(None, 28).render("Press SPACE to return to main menu", True, WHITE)
+            
+            screen.blit(msg1, ((WIDTH-msg1.get_width())//2, HEIGHT//2))
+            screen.blit(msg2, ((WIDTH-msg2.get_width())//2, HEIGHT//2+50))
+            screen.blit(msg3, ((WIDTH-msg3.get_width())//2, HEIGHT//2+90))
+            screen.blit(msg4, ((WIDTH-msg4.get_width())//2, HEIGHT//2+140))
+            screen.blit(msg5, ((WIDTH-msg5.get_width())//2, HEIGHT//2+190))
+            
+            # Fireworks effect
+            for i in range(10):
+                firework_x = (i * 80 + int(50 * math.sin(celebration_timer + i))) % WIDTH
+                firework_y = (i * 40 + int(30 * math.cos(celebration_timer * 1.5 + i))) % (HEIGHT//2) + 50
+                firework_color = ((i * 50) % 255, ((i * 100) % 255), ((i * 150) % 255))
+                pygame.draw.circle(screen, firework_color, (firework_x, firework_y), 3)
+            
+            pygame.display.flip()
+            if keys[pygame.K_SPACE]:
+                # Reset for new game
+                player.__init__()
+                current_level = 1
+                boss = None
+                score = 0
+                switch_parts = {'left_controller': False, 'right_controller': False, 'screen': False}
+                switch_parts_count = 0
+                platforms, enemies, coins, pipes, flag, powerups, mom = create_normal_level(current_level)
+                state = "START"
             clock.tick(FPS)
             continue
 
@@ -1522,13 +2445,16 @@ def main():
                         if in_secret_world:
                             platforms, enemies, coins, pipes, flag, powerups, mom = create_secret_level(secret_world_type)
                             boss = None
-                        elif current_level % 5 == 0:
-                            boss_level = current_level // 5
+                            return_to_normal_music()  # Normal music for secret world
+                        elif current_level % 3 == 0:
+                            boss_level = current_level // 3
                             platforms, enemies, coins, pipes, flag, powerups, boss = create_boss_level(boss_level)
                             mom = None
+                            start_boss_music()  # Boss music for boss levels
                         else:
                             boss = None
                             platforms, enemies, coins, pipes, flag, powerups, mom = create_normal_level(current_level)
+                            return_to_normal_music()  # Normal music for regular levels
                         
                         camera_x = 0
                         pipe_entry_timer = 0
@@ -1612,7 +2538,23 @@ def main():
                             
                             if boss.is_defeated():
                                 score += 1000  # Big bonus for defeating boss
-                                state = "COMPLETE"
+                                
+                                # Collect Nintendo Switch part based on boss number
+                                boss_number = current_level // 3
+                                if boss_number == 1 and not switch_parts['left_controller']:
+                                    switch_parts['left_controller'] = True
+                                    switch_parts_count += 1
+                                    state = "CUTSCENE_LEFT_CONTROLLER"
+                                elif boss_number == 2 and not switch_parts['right_controller']:
+                                    switch_parts['right_controller'] = True
+                                    switch_parts_count += 1
+                                    state = "CUTSCENE_RIGHT_CONTROLLER"
+                                elif boss_number == 3 and not switch_parts['screen']:
+                                    switch_parts['screen'] = True
+                                    switch_parts_count += 1
+                                    state = "CUTSCENE_SCREEN"
+                                else:
+                                    state = "COMPLETE"
                     elif not player.is_immune():
                         # Player touched boss but didn't stomp
                         if player.die():  # Returns True if game over
@@ -1626,6 +2568,19 @@ def main():
             remove_enemies = []
             for enemy in enemies:
                 enemy.move(platforms)
+                
+                # Check shuttlecock collisions for badminton enemies
+                if enemy.enemy_type == "badminton":
+                    for shuttlecock in enemy.shuttlecocks[:]:
+                        if player.rect.colliderect(shuttlecock.rect) and not player.is_immune():
+                            if player.die():  # Returns True if game over
+                                state = "GAMEOVER"
+                            else:
+                                # Player respawned with immunity
+                                play_sound(BOSS_HIT_SOUND)
+                            enemy.shuttlecocks.remove(shuttlecock)
+                            break
+                            
             for i,enemy in enumerate(enemies):
                 if player.rect.colliderect(enemy.rect) and not player.is_immune():
                     if player.vy > 0 and player.rect.bottom - enemy.rect.top < 24 and player.rect.top < enemy.rect.top:
@@ -1719,13 +2674,15 @@ def main():
                             # Keep the score gained in secret world, don't reset it
                             
                             # Recreate the original level
-                            if current_level % 5 == 0:
-                                boss_level = current_level // 5
+                            if current_level % 3 == 0:
+                                boss_level = current_level // 3
                                 platforms, enemies, coins, pipes, flag, powerups, boss = create_boss_level(boss_level)
                                 mom = None
+                                start_boss_music()  # Boss music when returning to boss level
                             else:
                                 boss = None
                                 platforms, enemies, coins, pipes, flag, powerups, mom = create_normal_level(current_level)
+                                return_to_normal_music()  # Normal music when returning to regular level
                             
                             # Reset player position
                             player.rect.x = 150
@@ -1756,13 +2713,15 @@ def main():
                     current_level = return_level
                     
                     # Recreate the original level
-                    if current_level % 5 == 0:
-                        boss_level = current_level // 5
+                    if current_level % 3 == 0:
+                        boss_level = current_level // 3
                         platforms, enemies, coins, pipes, flag, powerups, boss = create_boss_level(boss_level)
                         mom = None
+                        start_boss_music()  # Boss music when returning to boss level from secret world
                     else:
                         boss = None
                         platforms, enemies, coins, pipes, flag, powerups, mom = create_normal_level(current_level)
+                        return_to_normal_music()  # Normal music when returning to regular level from secret world
                     
                     # Reset player position
                     player.rect.x = 150
@@ -1820,6 +2779,45 @@ def main():
                     pygame.draw.circle(screen, WHITE, (int(circle_x), int(circle_y)), circle_size)
                     pygame.draw.circle(screen, (240, 240, 255), (int(circle_x-2), int(circle_y-2)), circle_size-2)
         
+        # Update moving platforms
+        player_on_moving_platform = None
+        player_bottom = player.rect.bottom
+        player_was_on_platform = False
+        
+        for platform in platforms:
+            if hasattr(platform, 'update'):  # Check if it's a MovingPlatform
+                # Store old position
+                old_x, old_y = platform.rect.x, platform.rect.y
+                
+                # Check if player is on this platform before moving it
+                if (player.rect.bottom <= platform.rect.top + 10 and 
+                    player.rect.bottom >= platform.rect.top - 5 and
+                    player.rect.centerx >= platform.rect.left - 10 and 
+                    player.rect.centerx <= platform.rect.right + 10):
+                    player_on_moving_platform = platform
+                    player_was_on_platform = True
+                
+                # Update platform position
+                platform.update()
+                
+                # Move player with platform if they were on it
+                if player_on_moving_platform == platform and player_was_on_platform:
+                    dx = platform.rect.x - old_x
+                    dy = platform.rect.y - old_y
+                    player.rect.x += dx
+                    player.rect.y += dy
+                
+                # Also move enemies that are on this moving platform
+                for enemy in enemies:
+                    if (hasattr(enemy, 'platform') and enemy.platform == platform.rect):
+                        # Update enemy's platform reference
+                        enemy.platform = platform.rect
+                        # Move enemy with the platform
+                        dx = platform.rect.x - old_x
+                        dy = platform.rect.y - old_y
+                        enemy.rect.x += dx
+                        enemy.rect.y += dy
+        
         # Draw level elements
         for platform in platforms:
             platform.draw(screen, camera_x)
@@ -1860,9 +2858,48 @@ def main():
         else:
             level_text = font.render(f'Level: {current_level}', True, BLACK)
             screen.blit(level_text, (10, 50))
+            
+            # Show boss music indicator
+            if current_music_type == "boss":
+                boss_music_indicator = pygame.font.Font(None, 28).render('♪ BOSS FIGHT ♪', True, RED)
+                screen.blit(boss_music_indicator, (10, 85))
         
         lives_text = font.render(f'Lives: {player.lives}', True, BLACK)
-        screen.blit(lives_text, (10, 130 if in_secret_world else 90))
+        screen.blit(lives_text, (10, 130 if in_secret_world else (115 if current_music_type == "boss" and not in_secret_world else 90)))
+        
+        # Show Nintendo Switch parts collected
+        parts_y = 160 if in_secret_world else (145 if current_music_type == "boss" and not in_secret_world else 120)
+        parts_font = pygame.font.Font(None, 28)
+        parts_text = parts_font.render(f'Switch Parts: {switch_parts_count}/3', True, BLACK)
+        screen.blit(parts_text, (10, parts_y))
+        
+        # Draw visual Nintendo Switch parts indicators
+        switch_x = 200
+        switch_y = parts_y
+        
+        # Left controller
+        if switch_parts['left_controller']:
+            pygame.draw.rect(screen, BLUE, (switch_x, switch_y, 20, 25))
+            pygame.draw.circle(screen, BLACK, (switch_x + 10, switch_y + 8), 3)
+        else:
+            pygame.draw.rect(screen, (100, 100, 100), (switch_x, switch_y, 20, 25))
+            pygame.draw.rect(screen, BLACK, (switch_x, switch_y, 20, 25), 2)
+        
+        # Screen
+        if switch_parts['screen']:
+            pygame.draw.rect(screen, BLACK, (switch_x + 25, switch_y + 3, 30, 19))
+            pygame.draw.rect(screen, (100, 255, 100), (switch_x + 27, switch_y + 5, 26, 15))
+        else:
+            pygame.draw.rect(screen, (100, 100, 100), (switch_x + 25, switch_y + 3, 30, 19))
+            pygame.draw.rect(screen, BLACK, (switch_x + 25, switch_y + 3, 30, 19), 2)
+        
+        # Right controller
+        if switch_parts['right_controller']:
+            pygame.draw.rect(screen, RED, (switch_x + 60, switch_y, 20, 25))
+            pygame.draw.circle(screen, BLACK, (switch_x + 70, switch_y + 8), 3)
+        else:
+            pygame.draw.rect(screen, (100, 100, 100), (switch_x + 60, switch_y, 20, 25))
+            pygame.draw.rect(screen, BLACK, (switch_x + 60, switch_y, 20, 25), 2)
         
         # Show pipe entry hint when near warp pipes
         near_warp_pipe = False
