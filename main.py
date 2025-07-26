@@ -425,13 +425,45 @@ class Player:
         # Flash when immune
         if self.is_immune() and self.immunity_timer % 10 < 5:
             return  # Skip drawing to create flashing effect
-            
-        pygame.draw.ellipse(surf, RED, (self.rect.x-camera_x, self.rect.y+10, self.rect.w, self.rect.h-10))
-        pygame.draw.ellipse(surf, SKIN, (self.rect.x+10-camera_x, self.rect.y+10, self.rect.w-20, self.rect.h//2-5))
-        pygame.draw.ellipse(surf, BLUE, (self.rect.x+5-camera_x, self.rect.y, self.rect.w-10, 18))
-        pygame.draw.ellipse(surf, BLACK, (self.rect.x+19-camera_x, self.rect.y + 27, 6,11))
-        pygame.draw.ellipse(surf, BLACK, (self.rect.x+32-camera_x, self.rect.y + 27, 6,11))
-        pygame.draw.arc(surf, BLACK, (self.rect.x+18-camera_x, self.rect.y+37, 18,8), 3.5,6.0,2)
+        
+        # Enhanced Ahaanio character design
+        x = self.rect.x - camera_x
+        y = self.rect.y
+        
+        # Body (red shirt with better shading)
+        pygame.draw.ellipse(surf, RED, (x, y+10, self.rect.w, self.rect.h-10))
+        pygame.draw.ellipse(surf, (180, 45, 60), (x+5, y+12, self.rect.w-10, self.rect.h-15))  # Shirt highlight
+        
+        # Overalls/pants (blue with details)
+        pygame.draw.ellipse(surf, BLUE, (x+10, y+25, self.rect.w-20, self.rect.h//2))
+        pygame.draw.rect(surf, (0, 100, 200), (x+15, y+28, 4, 15))  # Overall strap left
+        pygame.draw.rect(surf, (0, 100, 200), (x+31, y+28, 4, 15))  # Overall strap right
+        
+        # Head (better skin tone and shading)
+        pygame.draw.ellipse(surf, SKIN, (x+10, y+5, self.rect.w-20, self.rect.h//2))
+        pygame.draw.ellipse(surf, (240, 200, 160), (x+12, y+7, self.rect.w-24, self.rect.h//2-4))  # Face highlight
+        
+        # Hair (more detailed)
+        pygame.draw.ellipse(surf, BROWN, (x+5, y, self.rect.w-10, 20))
+        pygame.draw.circle(surf, (120, 80, 40), (x+12, y+5), 8)  # Hair tuft left
+        pygame.draw.circle(surf, (120, 80, 40), (x+38, y+5), 8)  # Hair tuft right
+        
+        # Eyes (more expressive)
+        pygame.draw.ellipse(surf, WHITE, (x+16, y+15, 8, 10))  # Left eye white
+        pygame.draw.ellipse(surf, WHITE, (x+26, y+15, 8, 10))  # Right eye white
+        pygame.draw.circle(surf, BLACK, (x+19, y+19), 3)  # Left pupil
+        pygame.draw.circle(surf, BLACK, (x+29, y+19), 3)  # Right pupil
+        pygame.draw.circle(surf, WHITE, (x+20, y+18), 1)  # Left eye shine
+        pygame.draw.circle(surf, WHITE, (x+30, y+18), 1)  # Right eye shine
+        
+        # Nose
+        pygame.draw.circle(surf, (220, 180, 140), (x+25, y+22), 2)
+        
+        # Mouth (happy expression)
+        pygame.draw.arc(surf, BLACK, (x+18, y+25, 14, 8), 0, 3.14, 2)
+        
+        # Mustache (Mario-style)
+        pygame.draw.ellipse(surf, BROWN, (x+16, y+23, 18, 4))
 
 class Enemy:
     def __init__(self, x, y, enemy_type="homework", plat_rect=None):
@@ -455,57 +487,186 @@ class Enemy:
             self.direction = -1
 
     def draw(self, surf, camera_x):
+        x = self.rect.x - camera_x
+        y = self.rect.y
+        w = self.rect.w
+        h = self.rect.h
+        
         if self.enemy_type == "homework":
-            # Draw homework book (brown book with lines)
-            pygame.draw.rect(surf, BROWN, (self.rect.x-camera_x, self.rect.y, self.rect.w, self.rect.h))
-            pygame.draw.rect(surf, WHITE, (self.rect.x-camera_x+3, self.rect.y+3, self.rect.w-6, self.rect.h-6))
-            # Draw lines on the book
-            for i in range(3):
-                pygame.draw.line(surf, BLACK, (self.rect.x-camera_x+5, self.rect.y+8+i*6), 
-                               (self.rect.x-camera_x+29, self.rect.y+8+i*6), 2)
-                
+            # Enhanced homework book with more detail
+            # Book cover (brown with gradient)
+            pygame.draw.rect(surf, BROWN, (x, y, w, h))
+            pygame.draw.rect(surf, (180, 120, 70), (x+2, y+2, w-4, h-4))  # Inner cover
+            
+            # Book pages (white with lines)
+            pygame.draw.rect(surf, WHITE, (x+3, y+3, w-6, h-6))
+            # Ruled lines
+            for i in range(4):
+                line_y = y + 8 + i * 6
+                pygame.draw.line(surf, (200, 200, 255), (x+5, line_y), (x+w-5, line_y), 1)
+            
+            # Book spine
+            pygame.draw.rect(surf, (100, 60, 30), (x, y, 3, h))
+            
+            # Title on cover
+            pygame.draw.rect(surf, BLACK, (x+6, y+6, w-12, 4))
+            
         elif self.enemy_type == "chores":
-            # Draw broom (cleaning chores)
-            pygame.draw.rect(surf, BROWN, (self.rect.x-camera_x+12, self.rect.y, 8, 20))  # Handle
-            pygame.draw.ellipse(surf, YELLOW, (self.rect.x-camera_x+5, self.rect.y+20, 22, 12))  # Broom head
+            # Enhanced broom with more detail
+            # Broom handle (wood grain effect)
+            pygame.draw.rect(surf, BROWN, (x+12, y, 8, 20))
+            pygame.draw.rect(surf, (160, 120, 80), (x+13, y, 6, 20))  # Wood highlight
+            # Wood grain lines
+            for i in range(y, y+20, 3):
+                pygame.draw.line(surf, (120, 80, 40), (x+13, i), (x+18, i), 1)
+            
+            # Broom head (bristles)
+            pygame.draw.ellipse(surf, YELLOW, (x+5, y+18, 22, 14))
+            pygame.draw.ellipse(surf, (255, 255, 150), (x+7, y+20, 18, 10))  # Bristle highlight
+            
+            # Individual bristle details
+            for i in range(6):
+                bristle_x = x + 8 + i * 3
+                pygame.draw.line(surf, (200, 180, 100), (bristle_x, y+22), (bristle_x, y+30), 1)
             
         elif self.enemy_type == "badminton":
-            # Draw badminton racket
-            pygame.draw.ellipse(surf, RED, (self.rect.x-camera_x+8, self.rect.y, 18, 20))  # Racket head
-            pygame.draw.rect(surf, BROWN, (self.rect.x-camera_x+15, self.rect.y+15, 4, 15))  # Handle
-            # Draw strings
-            pygame.draw.line(surf, WHITE, (self.rect.x-camera_x+12, self.rect.y+5), 
-                           (self.rect.x-camera_x+12, self.rect.y+15), 1)
-            pygame.draw.line(surf, WHITE, (self.rect.x-camera_x+20, self.rect.y+5), 
-                           (self.rect.x-camera_x+20, self.rect.y+15), 1)
-                           
-        elif self.enemy_type == "shower":
-            # Draw shower head
-            pygame.draw.rect(surf, (180, 180, 180), (self.rect.x-camera_x+5, self.rect.y+5, 24, 15))
-            # Draw water drops
+            # Enhanced badminton racket
+            # Racket frame
+            pygame.draw.ellipse(surf, RED, (x+8, y, 18, 22))
+            pygame.draw.ellipse(surf, (255, 100, 100), (x+10, y+2, 14, 18))  # Inner frame
+            
+            # Handle with grip
+            pygame.draw.rect(surf, BROWN, (x+15, y+15, 4, 17))
+            pygame.draw.rect(surf, (160, 120, 80), (x+15, y+15, 4, 17))
+            # Grip texture
+            for i in range(y+16, y+30, 2):
+                pygame.draw.line(surf, (100, 70, 40), (x+15, i), (x+18, i), 1)
+            
+            # Racket strings (crossing pattern)
+            for i in range(3):
+                string_x = x + 12 + i * 3
+                pygame.draw.line(surf, WHITE, (string_x, y+4), (string_x, y+18), 1)
             for i in range(4):
-                pygame.draw.circle(surf, BLUE, (self.rect.x-camera_x+8+i*5, self.rect.y+25), 2)
+                string_y = y + 5 + i * 3
+                pygame.draw.line(surf, WHITE, (x+10, string_y), (x+24, string_y), 1)
+                
+        elif self.enemy_type == "shower":
+            # Enhanced shower head
+            # Shower head body (metallic look)
+            pygame.draw.rect(surf, (180, 180, 180), (x+5, y+5, 24, 15))
+            pygame.draw.rect(surf, (220, 220, 220), (x+6, y+6, 22, 13))  # Metallic highlight
+            pygame.draw.rect(surf, (140, 140, 140), (x+26, y+6, 2, 13))   # Shadow edge
+            
+            # Shower holes
+            for i in range(3):
+                for j in range(6):
+                    hole_x = x + 8 + j * 3
+                    hole_y = y + 8 + i * 3
+                    pygame.draw.circle(surf, (100, 100, 100), (hole_x, hole_y), 1)
+            
+            # Water drops (animated)
+            import random
+            for i in range(6):
+                drop_x = x + 8 + i * 3
+                drop_y = y + 22 + random.randint(0, 8)  # Animated falling
+                # Water drop shape
+                pygame.draw.circle(surf, BLUE, (drop_x, drop_y), 2)
+                pygame.draw.circle(surf, (150, 200, 255), (drop_x-1, drop_y-1), 1)  # Highlight
+                
         else:
-            # Default enemy (original design)
-            pygame.draw.ellipse(surf, BROWN, (self.rect.x-camera_x, self.rect.y, self.rect.w, self.rect.h//2+6))
-            pygame.draw.ellipse(surf, SKIN, (self.rect.x+5-camera_x, self.rect.y+self.rect.h//2-4, self.rect.w-10, self.rect.h//2-2))
-            pygame.draw.ellipse(surf, BLACK, (self.rect.x+13-camera_x, self.rect.y+15, 5,7))
-            pygame.draw.ellipse(surf, BLACK, (self.rect.x+22-camera_x, self.rect.y+15, 5,7))
+            # Enhanced default enemy with better shading
+            # Body (shirt)
+            pygame.draw.ellipse(surf, BROWN, (x, y, w, h//2+6))
+            pygame.draw.ellipse(surf, (180, 120, 70), (x+2, y+2, w-4, h//2+2))  # Shirt highlight
+            
+            # Head
+            pygame.draw.ellipse(surf, SKIN, (x+5, y+h//2-4, w-10, h//2-2))
+            pygame.draw.ellipse(surf, (240, 200, 160), (x+7, y+h//2-2, w-14, h//2-6))  # Face highlight
+            
+            # Eyes with pupils
+            pygame.draw.ellipse(surf, WHITE, (x+11, y+13, 7, 9))  # Left eye white
+            pygame.draw.ellipse(surf, WHITE, (x+20, y+13, 7, 9))  # Right eye white
+            pygame.draw.circle(surf, BLACK, (x+14, y+16), 2)     # Left pupil
+            pygame.draw.circle(surf, BLACK, (x+23, y+16), 2)     # Right pupil
 
 class Platform:
     def __init__(self, x, y, w, h):
         self.rect = pygame.Rect(x, y, w, h)
     def draw(self, surf, camera_x):
-        pygame.draw.rect(surf, BLUE, (self.rect.x+8-camera_x, self.rect.y, self.rect.w-16, self.rect.h), border_radius=9)
-        pygame.draw.ellipse(surf, BLUE, (self.rect.x-camera_x, self.rect.y, 16, self.rect.h))
-        pygame.draw.ellipse(surf, BLUE, (self.rect.x+self.rect.w-16-camera_x, self.rect.y, 16, self.rect.h))
+        # Enhanced platform with brick texture and 3D effect
+        x = self.rect.x - camera_x
+        y = self.rect.y
+        w = self.rect.w
+        h = self.rect.h
+        
+        # Main platform body (darker blue)
+        pygame.draw.rect(surf, (0, 100, 180), (x+8, y, w-16, h), border_radius=9)
+        
+        # Brick pattern
+        brick_width = 24
+        brick_height = 8
+        for row in range(0, h, brick_height):
+            for col in range(0, w-16, brick_width):
+                # Alternate brick offset for realistic pattern
+                offset = (brick_width // 2) if (row // brick_height) % 2 else 0
+                brick_x = x + 8 + col + offset
+                brick_y = y + row
+                
+                if brick_x + brick_width <= x + w - 8:  # Don't draw outside platform
+                    # Brick body
+                    pygame.draw.rect(surf, BLUE, (brick_x, brick_y, brick_width-2, brick_height-1))
+                    # Brick highlight (3D effect)
+                    pygame.draw.line(surf, (100, 150, 255), (brick_x, brick_y), (brick_x + brick_width-2, brick_y))
+                    pygame.draw.line(surf, (100, 150, 255), (brick_x, brick_y), (brick_x, brick_y + brick_height-1))
+                    # Brick shadow
+                    pygame.draw.line(surf, (0, 80, 160), (brick_x + brick_width-2, brick_y), (brick_x + brick_width-2, brick_y + brick_height-1))
+                    pygame.draw.line(surf, (0, 80, 160), (brick_x, brick_y + brick_height-1), (brick_x + brick_width-2, brick_y + brick_height-1))
+        
+        # Rounded end caps with 3D shading
+        # Left cap
+        pygame.draw.ellipse(surf, BLUE, (x, y, 16, h))
+        pygame.draw.ellipse(surf, (100, 150, 255), (x+2, y+1, 12, h-2))  # Highlight
+        
+        # Right cap  
+        pygame.draw.ellipse(surf, BLUE, (x+w-16, y, 16, h))
+        pygame.draw.ellipse(surf, (0, 80, 160), (x+w-14, y+1, 12, h-2))  # Shadow
 
 class Coin:
     def __init__(self, x, y):
         self.rect = pygame.Rect(x, y, 20, 20)
+        self.rotation = 0  # For spinning animation
     def draw(self, surf, camera_x):
-        pygame.draw.circle(surf, GOLDEN, (self.rect.x+10-camera_x, self.rect.y+10), 10)
-        pygame.draw.ellipse(surf, WHITE, (self.rect.x+10-camera_x, self.rect.y+3, 6,5))
+        # Animated spinning coin with 3D effect
+        self.rotation += 3  # Spin speed
+        
+        x = self.rect.x + 10 - camera_x
+        y = self.rect.y + 10
+        
+        # Create spinning effect by varying the ellipse width
+        import math
+        spin_width = int(10 * abs(math.cos(self.rotation * 0.1)))
+        
+        # Coin shadow
+        pygame.draw.ellipse(surf, (180, 150, 30), (x-11, y-9, spin_width + 2, 18))
+        
+        # Main coin body
+        pygame.draw.ellipse(surf, GOLDEN, (x-10, y-10, spin_width, 20))
+        
+        # Coin highlight (3D effect)
+        if spin_width > 3:
+            pygame.draw.ellipse(surf, (255, 240, 100), (x-8, y-8, max(1, spin_width-4), 16))
+        
+        # Inner detail (dollar sign or star when face-on)
+        if spin_width > 6:
+            # Draw a star when coin is facing forward
+            star_points = []
+            for i in range(5):
+                angle = i * 2 * math.pi / 5 - math.pi/2
+                star_x = x + 3 * math.cos(angle)
+                star_y = y + 3 * math.sin(angle)
+                star_points.append((star_x, star_y))
+            if len(star_points) >= 3:
+                pygame.draw.polygon(surf, (200, 160, 20), star_points)
 
 class Pipe:
     def __init__(self, x, y, width=50, height=70, is_warp_pipe=False):
@@ -514,9 +675,17 @@ class Pipe:
         self.warp_timer = 0  # For animation when player can enter
         
     def draw(self, surf, camera_x):
+        # Enhanced pipe with better 3D effect and textures
+        x = self.rect.x - camera_x
+        y = self.rect.y
+        w = self.rect.w
+        h = self.rect.h
+        
         # Base pipe color - special glow for warp pipes
         base_color = PIPE_GREEN
         rim_color = PIPE_GREEN
+        highlight_color = (40, 180, 80)
+        shadow_color = (0, 100, 40)
         
         if self.is_warp_pipe:
             # Magical glowing effect for warp pipes
@@ -524,20 +693,46 @@ class Pipe:
             glow_intensity = int(50 + 30 * math.sin(self.warp_timer * 0.1))
             base_color = (0, 140 + glow_intensity//2, 51 + glow_intensity//3)
             rim_color = (0 + glow_intensity//4, 140 + glow_intensity//2, 51 + glow_intensity//2)
+            highlight_color = (40 + glow_intensity//3, 180 + glow_intensity//4, 80 + glow_intensity//3)
+            shadow_color = (0, 100 + glow_intensity//6, 40 + glow_intensity//4)
             self.warp_timer += 1
         
-        pygame.draw.rect(surf, base_color, (self.rect.x-camera_x, self.rect.y+15, self.rect.w, self.rect.h-15))
-        pygame.draw.ellipse(surf, rim_color, (self.rect.x-camera_x-8, self.rect.y, self.rect.w+16, 28))
-        pygame.draw.rect(surf, (80,200,120), (self.rect.x-camera_x+9, self.rect.y+25, 8, self.rect.h-31))
+        # Main pipe body with 3D shading
+        pygame.draw.rect(surf, base_color, (x, y+15, w, h-15))
+        # Highlight on left side
+        pygame.draw.rect(surf, highlight_color, (x, y+15, 8, h-15))
+        # Shadow on right side
+        pygame.draw.rect(surf, shadow_color, (x+w-8, y+15, 8, h-15))
+        
+        # Pipe rim (3D ellipse effect)
+        pygame.draw.ellipse(surf, rim_color, (x-8, y, w+16, 28))
+        # Rim highlight
+        pygame.draw.ellipse(surf, highlight_color, (x-6, y+2, w+12, 24), 3)
+        # Rim shadow
+        pygame.draw.ellipse(surf, shadow_color, (x-6, y+4, w+12, 20), 2)
+        
+        # Inner pipe detail
+        pygame.draw.rect(surf, highlight_color, (x+9, y+25, 8, h-31))
+        # Inner pipe shadow
+        pygame.draw.rect(surf, shadow_color, (x+w-17, y+25, 8, h-31))
+        
+        # Pipe segments (horizontal lines for texture)
+        for i in range(y+30, y+h-10, 12):
+            pygame.draw.line(surf, shadow_color, (x+3, i), (x+w-3, i), 1)
+            pygame.draw.line(surf, highlight_color, (x+3, i+1), (x+w-3, i+1), 1)
         
         # Draw magical sparkles for warp pipes
         if self.is_warp_pipe:
             import random
-            for i in range(3):
-                if random.randint(1, 10) == 1:  # Random sparkles
-                    sparkle_x = self.rect.x - camera_x + random.randint(5, self.rect.w-5)
-                    sparkle_y = self.rect.y + random.randint(10, self.rect.h-10)
-                    pygame.draw.circle(surf, YELLOW, (sparkle_x, sparkle_y), 2)
+            for i in range(5):  # More sparkles
+                if random.randint(1, 8) == 1:  # More frequent sparkles
+                    sparkle_x = x + random.randint(5, w-5)
+                    sparkle_y = y + random.randint(10, h-10)
+                    # Multi-colored sparkles
+                    sparkle_colors = [YELLOW, WHITE, (255, 200, 255), (200, 255, 255)]
+                    color = random.choice(sparkle_colors)
+                    pygame.draw.circle(surf, color, (sparkle_x, sparkle_y), 3)
+                    pygame.draw.circle(surf, WHITE, (sparkle_x, sparkle_y), 1)
 
 class Flag:
     def __init__(self, x, y, height=140):
@@ -803,9 +998,8 @@ def create_normal_level(level_num=1):
 
     flag = Flag(LEVEL_END_X+35, HEIGHT-50)
     
-    # Add mom as an enemy in normal levels too
-    import random
-    mom = Mom(random.randint(800, 1400), HEIGHT-110)
+    # No mom in normal levels - she only appears in boss fights
+    mom = None
     
     return platforms, enemies, coins, pipes, flag, powerups, mom
 
@@ -1243,7 +1437,7 @@ def main():
         
         player.move(platforms)
         
-        # Handle mom enemy if exists (normal levels)
+        # Handle mom enemy if exists (only in boss levels, not normal levels)
         if mom:
             mom.update()
             
@@ -1452,7 +1646,42 @@ def main():
         if camera_x > max_cam:
             camera_x = max_cam
 
-        screen.fill((92,192,255))
+        # Enhanced background with gradient sky
+        if in_secret_world:
+            # Magical rainbow background for secret worlds
+            import math
+            import time
+            warp_timer = time.time() * 100  # Use time for animation
+            for y in range(HEIGHT):
+                ratio = y / HEIGHT
+                # Rainbow gradient effect
+                r = int(128 + 127 * math.sin(ratio * 2 + warp_timer * 0.05))
+                g = int(128 + 127 * math.sin(ratio * 2 + 2 + warp_timer * 0.05))
+                b = int(128 + 127 * math.sin(ratio * 2 + 4 + warp_timer * 0.05))
+                pygame.draw.line(screen, (r, g, b), (0, y), (WIDTH, y))
+        else:
+            # Beautiful sky gradient for normal levels
+            for y in range(HEIGHT):
+                ratio = y / HEIGHT
+                # Sky blue to lighter blue gradient
+                r = int(92 + ratio * 50)   # 92 to 142
+                g = int(192 + ratio * 40)  # 192 to 232  
+                b = int(255)               # Pure blue
+                pygame.draw.line(screen, (r, g, b), (0, y), (WIDTH, y))
+            
+            # Add some clouds
+            import random
+            random.seed(42)  # Consistent cloud positions
+            for i in range(8):
+                cloud_x = (i * 250 + random.randint(-50, 50) - camera_x // 3) % (WIDTH + 200) - 100
+                cloud_y = 50 + random.randint(-20, 40)
+                # Cloud made of circles
+                for j in range(4):
+                    circle_x = cloud_x + j * 15 + random.randint(-5, 5)
+                    circle_y = cloud_y + random.randint(-8, 8)
+                    circle_size = 15 + random.randint(-3, 8)
+                    pygame.draw.circle(screen, WHITE, (int(circle_x), int(circle_y)), circle_size)
+                    pygame.draw.circle(screen, (240, 240, 255), (int(circle_x-2), int(circle_y-2)), circle_size-2)
         
         # Draw level elements
         for platform in platforms:
