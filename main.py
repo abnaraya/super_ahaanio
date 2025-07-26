@@ -1289,6 +1289,10 @@ def main():
     return_level = 1  # Which level to return to
     return_score = 0  # Score before entering secret world
     pipe_entry_timer = 0  # Cooldown for pipe entry
+    
+    # Pause menu state
+    game_paused = False
+    pause_menu_selection = 0  # 0=Resume, 1=Restart, 2=Home
 
     # STORY PAGES as list of strings
     story_pages = [
@@ -1466,168 +1470,59 @@ def main():
             continue
 
         # --- Game Play ---
-        # Handle music volume controls
-        if keys[pygame.K_PLUS] or keys[pygame.K_EQUALS]:
-            music_volume = min(1.0, music_volume + 0.01)
-            set_music_volume(music_volume)
-        if keys[pygame.K_MINUS]:
-            music_volume = max(0.0, music_volume - 0.01)
-            set_music_volume(music_volume)
-        if keys[pygame.K_m]:
-            if music_volume > 0:
-                set_music_volume(0)
+        # Handle pause menu
+        if keys[pygame.K_ESCAPE] or keys[pygame.K_p]:
+            if not hasattr(main, 'pause_key_pressed'):
+                main.pause_key_pressed = False
+            if not main.pause_key_pressed:
+                game_paused = not game_paused
+                pause_menu_selection = 0  # Reset to Resume
+            main.pause_key_pressed = True
+        else:
+            if hasattr(main, 'pause_key_pressed'):
+                main.pause_key_pressed = False
+        
+        if game_paused:
+            # Handle pause menu navigation
+            if keys[pygame.K_UP]:
+                if not hasattr(main, 'up_key_pressed'):
+                    main.up_key_pressed = False
+                if not main.up_key_pressed:
+                    pause_menu_selection = (pause_menu_selection - 1) % 3
+                main.up_key_pressed = True
             else:
-                set_music_volume(0.15)  # Restore to new default volume
-                music_volume = 0.15
-        
-        player.move(platforms)
-        
-        # Handle mom enemy if exists (only in boss levels, not normal levels)
-        if mom:
-            mom.update()
-            
-            # Check collision with mom's slippers
-            for slipper in mom.slippers[:]:
-                if player.rect.colliderect(slipper.rect) and not player.is_immune():
-                    if player.die():  # Returns True if game over
-                        state = "GAMEOVER"
-                    else:
-                        # Player respawned with immunity
-                        play_sound(BOSS_HIT_SOUND)
-                    break
-        
-        # Handle boss fight if boss exists
-        if boss:
-            boss.update(player)
-            
-            # Check collision with boss slippers
-            for slipper in boss.slippers[:]:
-                if player.rect.colliderect(slipper.rect) and not player.is_immune():
-                    if player.die():  # Returns True if game over
-                        state = "GAMEOVER"
-                    else:
-                        # Player respawned with immunity
-                        play_sound(BOSS_HIT_SOUND)
-                    break
-            
-            # Check if player can stomp on boss
-            if player.rect.colliderect(boss.rect):
-                if player.vy > 0 and player.rect.bottom - boss.rect.top < 40 and player.rect.top < boss.rect.top + 10:  # More forgiving stomp detection
-                    if boss.take_damage():
-                        player.vy = JUMP_HEIGHT // 2
-                        score += 500  # Bonus for hitting boss
-                        play_sound(BOSS_HIT_SOUND)
-                        
-                        if boss.is_defeated():
-                            score += 1000  # Big bonus for defeating boss
-                            state = "COMPLETE"
-                elif not player.is_immune():
-                    # Player touched boss but didn't stomp
-                    if player.die():  # Returns True if game over
-                        state = "GAMEOVER"
-                    else:
-                        # Player respawned with immunity
-                        play_sound(BOSS_HIT_SOUND)
-        
-        # Handle regular enemies
-        stomped = False
-        remove_enemies = []
-        for enemy in enemies:
-            enemy.move(platforms)
-        for i,enemy in enumerate(enemies):
-            if player.rect.colliderect(enemy.rect) and not player.is_immune():
-                if player.vy > 0 and player.rect.bottom - enemy.rect.top < 24 and player.rect.top < enemy.rect.top:
-                    remove_enemies.append(i)
-                    player.vy = JUMP_HEIGHT // 2
-                    stomped = True
-                    score += 100
-                    play_sound(STOMP_SOUND)  # Use the satisfying stomp sound
-                else:
-                    # Player was killed by enemy
-                    if player.die():  # Returns True if game over
-                        state = "GAMEOVER"
-                    else:
-                        # Player respawned with immunity, play a sound
-                        play_sound(BOSS_HIT_SOUND)  # Reuse boss hit sound for respawn
-                    break
-        for idx in sorted(remove_enemies, reverse=True):
-            del enemies[idx]
-            
-        # Handle coin collection
-        for coin in coins[:]:
-            if player.rect.colliderect(coin.rect):
-                coins.remove(coin)
-                score += 1
-                play_sound(COIN_SOUND)
-                
-        # Handle power-up collection
-        for powerup in powerups[:]:
-            if not powerup.collected and player.rect.colliderect(powerup.rect):
-                powerup.collected = True
-                player.apply_powerup(powerup.power_type)
-                powerups.remove(powerup)
-                score += 50  # Bonus points for power-ups
-                play_sound(LEVEL_COMPLETE_SOUND)  # Special sound for power-ups
-                
-        # Update power-ups
-        for powerup in powerups:
-            powerup.update()
-                
-        # Handle pipe collisions and secret world entry
-        pipe_entered = False
-        for pipe in pipes:
-            if player.rect.colliderect(pipe.rect):
-                if player.rect.bottom > pipe.rect.top and player.vy >= 0:
-                    player.rect.bottom = pipe.rect.top
-                    player.vy = 0
-                    player.on_ground = True
-                
-                # Check for warp pipe entry (DOWN key + on warp pipe + not in cooldown)
-                if (pipe.is_warp_pipe and keys[pygame.K_DOWN] and 
-                    player.on_ground and pipe_entry_timer <= 0 and not pipe_entered):
+                if hasattr(main, 'up_key_pressed'):
+                    main.up_key_pressed = False
                     
-                    if not in_secret_world:
-                        # Entering secret world
-                        pipe_entered = True
-                        in_secret_world = True
-                        return_level = current_level
-                        return_score = score
+            if keys[pygame.K_DOWN]:
+                if not hasattr(main, 'down_key_pressed'):
+                    main.down_key_pressed = False
+                if not main.down_key_pressed:
+                    pause_menu_selection = (pause_menu_selection + 1) % 3
+                main.down_key_pressed = True
+            else:
+                if hasattr(main, 'down_key_pressed'):
+                    main.down_key_pressed = False
+            
+            if keys[pygame.K_SPACE] or keys[pygame.K_RETURN]:
+                if not hasattr(main, 'select_key_pressed'):
+                    main.select_key_pressed = False
+                if not main.select_key_pressed:
+                    if pause_menu_selection == 0:  # Resume
+                        game_paused = False
+                    elif pause_menu_selection == 1:  # Restart Level
+                        game_paused = False
+                        # Save power-up state before resetting
+                        saved_lives = player.lives
                         
-                        # Choose secret world type based on current level
-                        import random
-                        secret_world_type = ((current_level - 1) % 3) + 1
+                        player.__init__()
+                        player.lives = saved_lives  # Keep lives but reset position
                         
-                        # Create secret level
-                        platforms, enemies, coins, pipes, flag, powerups, mom = create_secret_level(secret_world_type)
-                        boss = None
-                        
-                        # Reset player position for secret world
-                        player.rect.x = 150
-                        player.rect.y = HEIGHT - 100
-                        player.vy = 0
-                        
-                        # Bonus score for finding secret world!
-                        score += 500
-                        
-                        # Play special sound
-                        play_sound(LEVEL_COMPLETE_SOUND)
-                        
-                        # Reset camera
-                        camera_x = 0
-                        
-                        # Set pipe entry cooldown
-                        pipe_entry_timer = 60  # 1 second cooldown
-                        
-                    else:
-                        # Returning from secret world
-                        pipe_entered = True
-                        in_secret_world = False
-                        current_level = return_level
-                        
-                        # Keep the score gained in secret world, don't reset it
-                        
-                        # Recreate the original level
-                        if current_level % 5 == 0:
+                        # Recreate current level
+                        if in_secret_world:
+                            platforms, enemies, coins, pipes, flag, powerups, mom = create_secret_level(secret_world_type)
+                            boss = None
+                        elif current_level % 5 == 0:
                             boss_level = current_level // 5
                             platforms, enemies, coins, pipes, flag, powerups, boss = create_boss_level(boss_level)
                             mom = None
@@ -1635,61 +1530,258 @@ def main():
                             boss = None
                             platforms, enemies, coins, pipes, flag, powerups, mom = create_normal_level(current_level)
                         
-                        # Reset player position
-                        player.rect.x = 150
-                        player.rect.y = HEIGHT - 100
-                        player.vy = 0
-                        
-                        # Play return sound
-                        play_sound(JUMP_SOUND)
-                        
-                        # Reset camera
                         camera_x = 0
+                        pipe_entry_timer = 0
                         
-                        # Set pipe entry cooldown
-                        pipe_entry_timer = 60  # 1 second cooldown
-                    
-                    break  # Exit pipe loop after entering
-        
-        # Update pipe entry cooldown
-        if pipe_entry_timer > 0:
-            pipe_entry_timer -= 1
-
-        # Handle flag collision (only for non-boss levels)
-        if flag and player.rect.colliderect(flag.rect):
-            if in_secret_world:
-                # Completing secret world gives bonus but returns to normal world
-                score += 1000  # Big bonus for completing secret world!
-                in_secret_world = False
-                current_level = return_level
-                
-                # Recreate the original level
-                if current_level % 5 == 0:
-                    boss_level = current_level // 5
-                    platforms, enemies, coins, pipes, flag, powerups, boss = create_boss_level(boss_level)
-                    mom = None
-                else:
-                    boss = None
-                    platforms, enemies, coins, pipes, flag, powerups, mom = create_normal_level(current_level)
-                
-                # Reset player position
-                player.rect.x = 150
-                player.rect.y = HEIGHT - 100
-                player.vy = 0
-                camera_x = 0
-                
-                # Play special completion sound
-                play_sound(LEVEL_COMPLETE_SOUND)
+                    elif pause_menu_selection == 2:  # Go to Home
+                        game_paused = False
+                        state = "START"
+                        # Reset everything
+                        player.__init__()
+                        current_level = 1
+                        score = 0
+                        boss = None
+                        mom = None
+                        in_secret_world = False
+                        platforms, enemies, coins, pipes, flag, powerups, mom = create_normal_level(current_level)
+                        camera_x = 0
+                        pipe_entry_timer = 0
+                main.select_key_pressed = True
             else:
-                # Normal level completion
-                state = "COMPLETE"
-
-        camera_x = player.rect.centerx - WIDTH // 2
-        if camera_x < 0:
-            camera_x = 0
-        max_cam = LEVEL_END_X + 100 - WIDTH
-        if camera_x > max_cam:
-            camera_x = max_cam
+                if hasattr(main, 'select_key_pressed'):
+                    main.select_key_pressed = False
+            
+            # Draw pause menu and skip rest of game logic
+            # (Drawing code will be added later in the rendering section)
+        else:
+            # Normal game logic continues only if not paused
+            pass
+        
+        if not game_paused:  # Only process game logic if not paused
+            # Handle music volume controls
+            if keys[pygame.K_PLUS] or keys[pygame.K_EQUALS]:
+                music_volume = min(1.0, music_volume + 0.01)
+                set_music_volume(music_volume)
+            if keys[pygame.K_MINUS]:
+                music_volume = max(0.0, music_volume - 0.01)
+                set_music_volume(music_volume)
+            if keys[pygame.K_m]:
+                if music_volume > 0:
+                    set_music_volume(0)
+                else:
+                    set_music_volume(0.15)  # Restore to new default volume
+                    music_volume = 0.15
+        
+            player.move(platforms)
+        
+            # Handle mom enemy if exists (only in boss levels, not normal levels)
+            if mom:
+                mom.update()
+                
+                # Check collision with mom's slippers
+                for slipper in mom.slippers[:]:
+                    if player.rect.colliderect(slipper.rect) and not player.is_immune():
+                        if player.die():  # Returns True if game over
+                            state = "GAMEOVER"
+                        else:
+                            # Player respawned with immunity
+                            play_sound(BOSS_HIT_SOUND)
+                        break
+        
+            # Handle boss fight if boss exists
+            if boss:
+                boss.update(player)
+                
+                # Check collision with boss slippers
+                for slipper in boss.slippers[:]:
+                    if player.rect.colliderect(slipper.rect) and not player.is_immune():
+                        if player.die():  # Returns True if game over
+                            state = "GAMEOVER"
+                        else:
+                            # Player respawned with immunity
+                            play_sound(BOSS_HIT_SOUND)
+                        break
+                
+                # Check if player can stomp on boss
+                if player.rect.colliderect(boss.rect):
+                    if player.vy > 0 and player.rect.bottom - boss.rect.top < 40 and player.rect.top < boss.rect.top + 10:  # More forgiving stomp detection
+                        if boss.take_damage():
+                            player.vy = JUMP_HEIGHT // 2
+                            score += 500  # Bonus for hitting boss
+                            play_sound(BOSS_HIT_SOUND)
+                            
+                            if boss.is_defeated():
+                                score += 1000  # Big bonus for defeating boss
+                                state = "COMPLETE"
+                    elif not player.is_immune():
+                        # Player touched boss but didn't stomp
+                        if player.die():  # Returns True if game over
+                            state = "GAMEOVER"
+                        else:
+                            # Player respawned with immunity
+                            play_sound(BOSS_HIT_SOUND)
+        
+            # Handle regular enemies
+            stomped = False
+            remove_enemies = []
+            for enemy in enemies:
+                enemy.move(platforms)
+            for i,enemy in enumerate(enemies):
+                if player.rect.colliderect(enemy.rect) and not player.is_immune():
+                    if player.vy > 0 and player.rect.bottom - enemy.rect.top < 24 and player.rect.top < enemy.rect.top:
+                        remove_enemies.append(i)
+                        player.vy = JUMP_HEIGHT // 2
+                        stomped = True
+                        score += 100
+                        play_sound(STOMP_SOUND)  # Use the satisfying stomp sound
+                    else:
+                        # Player was killed by enemy
+                        if player.die():  # Returns True if game over
+                            state = "GAMEOVER"
+                        else:
+                            # Player respawned with immunity, play a sound
+                            play_sound(BOSS_HIT_SOUND)  # Reuse boss hit sound for respawn
+                        break
+            for idx in sorted(remove_enemies, reverse=True):
+                del enemies[idx]
+                
+            # Handle coin collection
+            for coin in coins[:]:
+                if player.rect.colliderect(coin.rect):
+                    coins.remove(coin)
+                    score += 1
+                    play_sound(COIN_SOUND)
+                    
+            # Handle power-up collection
+            for powerup in powerups[:]:
+                if not powerup.collected and player.rect.colliderect(powerup.rect):
+                    powerup.collected = True
+                    player.apply_powerup(powerup.power_type)
+                    powerups.remove(powerup)
+                    score += 50  # Bonus points for power-ups
+                    play_sound(LEVEL_COMPLETE_SOUND)  # Special sound for power-ups
+                    
+            # Update power-ups
+            for powerup in powerups:
+                powerup.update()
+                    
+            # Handle pipe collisions and secret world entry
+            pipe_entered = False
+            for pipe in pipes:
+                if player.rect.colliderect(pipe.rect):
+                    if player.rect.bottom > pipe.rect.top and player.vy >= 0:
+                        player.rect.bottom = pipe.rect.top
+                        player.vy = 0
+                        player.on_ground = True
+                    
+                    # Check for warp pipe entry (DOWN key + on warp pipe + not in cooldown)
+                    if (pipe.is_warp_pipe and keys[pygame.K_DOWN] and 
+                        player.on_ground and pipe_entry_timer <= 0 and not pipe_entered):
+                        
+                        if not in_secret_world:
+                            # Entering secret world
+                            pipe_entered = True
+                            in_secret_world = True
+                            return_level = current_level
+                            return_score = score
+                            
+                            # Choose secret world type based on current level
+                            import random
+                            secret_world_type = ((current_level - 1) % 3) + 1
+                            
+                            # Create secret level
+                            platforms, enemies, coins, pipes, flag, powerups, mom = create_secret_level(secret_world_type)
+                            boss = None
+                            
+                            # Reset player position for secret world
+                            player.rect.x = 150
+                            player.rect.y = HEIGHT - 100
+                            player.vy = 0
+                            
+                            # Bonus score for finding secret world!
+                            score += 500
+                            
+                            # Play special sound
+                            play_sound(LEVEL_COMPLETE_SOUND)
+                            
+                            # Reset camera
+                            camera_x = 0
+                            
+                            # Set pipe entry cooldown
+                            pipe_entry_timer = 60  # 1 second cooldown
+                            
+                        else:
+                            # Returning from secret world
+                            pipe_entered = True
+                            in_secret_world = False
+                            current_level = return_level
+                            
+                            # Keep the score gained in secret world, don't reset it
+                            
+                            # Recreate the original level
+                            if current_level % 5 == 0:
+                                boss_level = current_level // 5
+                                platforms, enemies, coins, pipes, flag, powerups, boss = create_boss_level(boss_level)
+                                mom = None
+                            else:
+                                boss = None
+                                platforms, enemies, coins, pipes, flag, powerups, mom = create_normal_level(current_level)
+                            
+                            # Reset player position
+                            player.rect.x = 150
+                            player.rect.y = HEIGHT - 100
+                            player.vy = 0
+                            
+                            # Play return sound
+                            play_sound(JUMP_SOUND)
+                            
+                            # Reset camera
+                            camera_x = 0
+                            
+                            # Set pipe entry cooldown
+                            pipe_entry_timer = 60  # 1 second cooldown
+                        
+                        break  # Exit pipe loop after entering
+            
+            # Update pipe entry cooldown
+            if pipe_entry_timer > 0:
+                pipe_entry_timer -= 1
+        
+            # Handle flag collision (only for non-boss levels)
+            if flag and player.rect.colliderect(flag.rect):
+                if in_secret_world:
+                    # Completing secret world gives bonus but returns to normal world
+                    score += 1000  # Big bonus for completing secret world!
+                    in_secret_world = False
+                    current_level = return_level
+                    
+                    # Recreate the original level
+                    if current_level % 5 == 0:
+                        boss_level = current_level // 5
+                        platforms, enemies, coins, pipes, flag, powerups, boss = create_boss_level(boss_level)
+                        mom = None
+                    else:
+                        boss = None
+                        platforms, enemies, coins, pipes, flag, powerups, mom = create_normal_level(current_level)
+                    
+                    # Reset player position
+                    player.rect.x = 150
+                    player.rect.y = HEIGHT - 100
+                    player.vy = 0
+                    camera_x = 0
+                    
+                    # Play special completion sound
+                    play_sound(LEVEL_COMPLETE_SOUND)
+                else:
+                    # Normal level completion
+                    state = "COMPLETE"
+        
+            camera_x = player.rect.centerx - WIDTH // 2
+            if camera_x < 0:
+                camera_x = 0
+            max_cam = LEVEL_END_X + 100 - WIDTH
+            if camera_x > max_cam:
+                camera_x = max_cam
 
         # Enhanced background with gradient sky
         if in_secret_world:
@@ -1812,6 +1904,60 @@ def main():
         
         volume_text = pygame.font.Font(None, 20).render(f'Vol: {int(music_volume * 100)}%', True, BLACK)
         screen.blit(volume_text, (WIDTH - 200, 30))
+        
+        # Show pause control
+        pause_text = pygame.font.Font(None, 20).render('ESC/P: Pause', True, BLACK)
+        screen.blit(pause_text, (WIDTH - 200, 50))
+        
+        # Draw pause menu if game is paused
+        if game_paused:
+            # Semi-transparent overlay
+            overlay = pygame.Surface((WIDTH, HEIGHT))
+            overlay.set_alpha(128)
+            overlay.fill(BLACK)
+            screen.blit(overlay, (0, 0))
+            
+            # Pause menu background
+            menu_width = 300
+            menu_height = 200
+            menu_x = (WIDTH - menu_width) // 2
+            menu_y = (HEIGHT - menu_height) // 2
+            
+            pygame.draw.rect(screen, WHITE, (menu_x, menu_y, menu_width, menu_height))
+            pygame.draw.rect(screen, BLACK, (menu_x, menu_y, menu_width, menu_height), 3)
+            
+            # Pause menu title
+            title_font = pygame.font.Font(None, 48)
+            title_text = title_font.render("PAUSED", True, BLACK)
+            title_x = menu_x + (menu_width - title_text.get_width()) // 2
+            screen.blit(title_text, (title_x, menu_y + 20))
+            
+            # Menu options
+            option_font = pygame.font.Font(None, 36)
+            options = ["Resume", "Restart Level", "Go to Home"]
+            
+            for i, option in enumerate(options):
+                color = RED if i == pause_menu_selection else BLACK
+                option_text = option_font.render(option, True, color)
+                option_x = menu_x + (menu_width - option_text.get_width()) // 2
+                option_y = menu_y + 80 + i * 40
+                screen.blit(option_text, (option_x, option_y))
+                
+                # Draw selection arrow
+                if i == pause_menu_selection:
+                    arrow_x = option_x - 30
+                    arrow_y = option_y + option_text.get_height() // 2
+                    pygame.draw.polygon(screen, RED, [
+                        (arrow_x, arrow_y - 8),
+                        (arrow_x, arrow_y + 8),
+                        (arrow_x + 15, arrow_y)
+                    ])
+            
+            # Instructions
+            inst_font = pygame.font.Font(None, 24)
+            inst_text = inst_font.render("↑↓ Navigate, SPACE/ENTER Select", True, BLACK)
+            inst_x = menu_x + (menu_width - inst_text.get_width()) // 2
+            screen.blit(inst_text, (inst_x, menu_y + menu_height - 30))
             
         pygame.display.flip()
         clock.tick(FPS)
