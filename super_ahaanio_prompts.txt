@@ -1,0 +1,11 @@
+Improve the game implementation based on the following. 
+
+Super Ahaanio is expected to be a game depicting elements in life of my son Ahaan. 
+
+His interests are - gaming devices - like Nintendo Switch, PS5, gadgets - like Apple Watch, Laptops, Music -like playing Drums, drummer in a Rock Band, sports - like playing soccer, swimming, basketball, ping-pong, tennis, rip-stick, skateboards, cycling etc, playing chess/carrom with his dad, mom and elder sister, spending quality time with his dad mom and elder sister, eating out in restaurants, favorite food - meditteranean - like Hummus, Garlic Sauce, Crave Fries, Chicken, italian - like Pasta, Pizza.
+
+Things he does not like so much - homework, study, parents asking him to study, parents yeling at him to do chores, clean up his room, take shower, eat home cooked food, going to badminton class, parents forcing him to an activity that he does not like, e.g. badminton class. 
+
+Use his likes and dislikes as elements in the game to design an interesting and creative game plan where his likes support him to meet his final target in the game, and his dislikes pose all kinds of challenges for him in the game. So basically his likes are his friends in the game and his dislikes are his foes in the game. Use them at significant points in the game plan, use them visually, make them appear visually on the game plan, create some interesting story at the beginning of the game, since this game is inspired from Super Mario that had an interesting story about Mario and Princess Peach and Bowser, create something custom cater to life os Ahaan his likes and dislikes. Please narrate the story at the beginning just like in Super Mario, and allow the user option to skip the story. Also provide controls in the game for the user to increase/decrease the game volume. 
+
+Make each level significantly different from the other. Use different elements at each level, gradually increasing the complexity in the game. And make each level a bit longer too, currently its too short and not challenging enough.
