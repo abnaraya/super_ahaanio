@@ -3,6 +3,9 @@ import sys
 import numpy as np
 import os
 import json
+import math
+import random
+import time
 
 # Initialize Pygame
 pygame.init()
@@ -321,7 +324,6 @@ class Slipper:
                 self.vy = 0
         else:
             # Random direction for stage 1
-            import random
             angle = random.uniform(0, 2 * 3.14159)
             self.vx = speed * pygame.math.Vector2(1, 0).rotate_rad(angle).x
             self.vy = speed * pygame.math.Vector2(1, 0).rotate_rad(angle).y
@@ -401,14 +403,32 @@ class Boss:
                 self.direction *= -1
                 self.move_timer = 0
 
-            # Move horizontally
+            # Move horizontally with improved boundaries
             self.rect.x += self.speed * self.direction
-            if self.rect.left <= 200:
-                self.rect.left = 200
+            
+            # Better boundary checking to keep boss on screen
+            # Left boundary - keep boss at least 100 pixels from left edge
+            if self.rect.left <= 100:
+                self.rect.left = 100
                 self.direction = 1
-            elif self.rect.right >= LEVEL_END_X - 200:
-                self.rect.right = LEVEL_END_X - 200
+            # Right boundary - keep boss at least 100 pixels from right edge
+            elif self.rect.right >= LEVEL_END_X - 100:
+                self.rect.right = LEVEL_END_X - 100
                 self.direction = -1
+                
+            # Additional safety check to prevent going off level completely
+            if self.rect.centerx < 150:
+                self.rect.centerx = 150
+                self.direction = 1
+            elif self.rect.centerx > LEVEL_END_X - 150:
+                self.rect.centerx = LEVEL_END_X - 150
+                self.direction = -1
+                
+            # Vertical boundary checking to keep boss above ground
+            if self.rect.bottom > HEIGHT - 80:  # Keep boss above ground level
+                self.rect.bottom = HEIGHT - 80
+            if self.rect.top < 100:  # Don't let boss go too high
+                self.rect.top = 100
 
             # Throw slippers
             self.slipper_timer += 1
@@ -420,10 +440,20 @@ class Boss:
 
         # Update slippers
         self.slippers = [s for s in self.slippers if not s.update()]
+        
+        # Global boundary enforcement for all stages
+        # Ensure boss never goes outside level bounds regardless of stage
+        if self.rect.left < 50:
+            self.rect.left = 50
+        if self.rect.right > LEVEL_END_X - 50:
+            self.rect.right = LEVEL_END_X - 50
+        if self.rect.bottom > HEIGHT - 60:
+            self.rect.bottom = HEIGHT - 60
+        if self.rect.top < 80:
+            self.rect.top = 80
 
     def throw_random_slippers(self):
         # Throw 3-4 slippers in different directions (reduced from 4-6)
-        import random
         num_slippers = random.randint(3, 4)
         for _ in range(num_slippers):
             slipper = Slipper(self.rect.centerx, self.rect.centery, None, None, 3 + self.level * 0.5)  # Slower slippers
@@ -488,7 +518,6 @@ class Mom:
         self.slippers = []
         
     def update(self):
-        import random
         self.throw_timer += 1
         # Update shout timer
         if self.shout_frames > 0:
@@ -794,7 +823,6 @@ class Enemy:
                     pygame.draw.circle(surf, (100, 100, 100), (hole_x, hole_y), 1)
             
             # Water drops (animated)
-            import random
             for i in range(6):
                 drop_x = x + 8 + i * 3
                 drop_y = y + 22 + random.randint(0, 8)  # Animated falling
@@ -1033,7 +1061,6 @@ class Pipe:
         
         # Draw magical sparkles for warp pipes
         if self.is_warp_pipe:
-            import random
             for i in range(5):  # More sparkles
                 if random.randint(1, 8) == 1:  # More frequent sparkles
                     sparkle_x = x + random.randint(5, w-5)
@@ -1157,7 +1184,73 @@ class PowerUp:
             ])
 
 def create_normal_level(level_num=1):
-    # Determine level pattern based on level number
+    # Special case: Level 5 - Badminton Court Challenge
+    if level_num == 5:
+        # BADMINTON COURT THEME - Forced badminton class nightmare!
+        platforms = [
+            Platform(0, HEIGHT - 50, LEVEL_END_X+100, 50),  # Ground (court floor)
+            Platform(200, 420, 120, 20),   # Badminton net post
+            Platform(400, 350, 100, 20),   # Court bench
+            MovingPlatform(580, 280, 80, 20, "vertical", 60, 1.5),   # Moving shuttlecock platform
+            Platform(750, 380, 140, 20),   # Equipment rack
+            MovingPlatform(950, 320, 100, 20, "horizontal", 80, 2),  # Moving racket platform
+            Platform(1150, 250, 120, 20),  # Coach's platform
+            MovingPlatform(1350, 400, 100, 20, "vertical", 70, 1),   # Moving training equipment
+            Platform(1550, 330, 110, 20),  # Court sideline
+            MovingPlatform(1750, 280, 120, 20, "horizontal", 100, 1.5),  # Moving exit platform
+            Platform(1950, 390, 150, 20)   # Freedom zone (exit from badminton class)
+        ]
+
+        # Lots of badminton enemies - representing the forced badminton class
+        enemies = [
+            Enemy(220, 420-34, "badminton", platforms[1].rect),    # Net area badminton
+            Enemy(420, 350-34, "badminton", platforms[2].rect),    # Bench area badminton
+            Enemy(770, 380-34, "badminton", platforms[4].rect),    # Equipment rack badminton
+            Enemy(1170, 250-34, "badminton", platforms[6].rect),   # Coach area (extra challenging)
+            Enemy(1570, 330-34, "badminton", platforms[8].rect),   # Sideline badminton
+            Enemy(1970, 390-34, "badminton", platforms[10].rect)   # Final badminton challenge
+        ]
+
+        # Coins scattered around the badminton court
+        coins = [
+            Coin(250, 400), Coin(280, 400), Coin(310, 400),     # Net area coins
+            Coin(450, 330), Coin(480, 330),                     # Bench coins
+            Coin(620, 260), Coin(650, 260),                     # Moving platform coins
+            Coin(800, 360), Coin(830, 360), Coin(860, 360),     # Equipment rack coins
+            Coin(1000, 300), Coin(1030, 300),                   # Moving racket coins
+            Coin(1200, 230), Coin(1230, 230), Coin(1260, 230),  # Coach platform coins
+            Coin(1400, 380), Coin(1430, 380),                   # Training equipment coins
+            Coin(1600, 310), Coin(1630, 310), Coin(1660, 310),  # Sideline coins
+            Coin(1800, 260), Coin(1830, 260),                   # Moving exit coins
+            Coin(2000, 370), Coin(2030, 370), Coin(2060, 370)   # Freedom zone coins
+        ]
+
+        # Power-ups representing Ahaan's preferred activities (escapes from badminton)
+        powerups = [
+            PowerUp(350, 400, 'nintendo'),   # Gaming escape from badminton
+            PowerUp(540, 330, 'drums'),      # Music instead of badminton
+            PowerUp(890, 360, 'soccer'),     # Real sports fun vs forced badminton
+            PowerUp(1100, 300, 'life'),      # Candy comfort from badminton stress
+            PowerUp(1300, 230, 'speed'),     # Pizza reward for surviving coach
+            PowerUp(1500, 310, 'jump'),      # Donut boost to escape sideline
+            PowerUp(1890, 370, 'nintendo')   # Final gaming reward for escaping badminton class
+        ]
+
+        # Special badminton court pipes
+        pipes = [
+            Pipe(120, HEIGHT-120, 60, 70),    # Locker room pipe
+            Pipe(500, HEIGHT-120, 60, 70, is_warp_pipe=True),   # SECRET ESCAPE PIPE!
+            Pipe(1000, HEIGHT-120, 60, 70),   # Equipment storage pipe
+            Pipe(1450, HEIGHT-120, 60, 70, is_warp_pipe=True),  # SECRET FREEDOM PIPE!
+            Pipe(1850, HEIGHT-120, 60, 70)    # Exit pipe
+        ]
+
+        flag = Flag(LEVEL_END_X+35, HEIGHT-50)
+        mom = None
+        
+        return platforms, enemies, coins, pipes, flag, powerups, mom
+    
+    # Determine level pattern based on level number (for all other levels)
     level_pattern = level_num % 4
     
     if level_pattern == 1:
@@ -1672,17 +1765,48 @@ def main():
                 title = pygame.font.Font(None, 56).render("Meet Ahaan!", True, GOLDEN)
                 screen.blit(title, ((WIDTH - title.get_width()) // 2, 50))
                 
-                # Draw Ahaan in center
-                pygame.draw.ellipse(screen, SKIN, (350, 150, 40, 50))  # Head
-                pygame.draw.rect(screen, GREEN, (345, 200, 50, 60))  # Body
-                pygame.draw.rect(screen, SKIN, (335, 250, 20, 40))  # Left arm
-                pygame.draw.rect(screen, SKIN, (385, 250, 20, 40))  # Right arm
-                pygame.draw.rect(screen, SKIN, (350, 260, 18, 40))  # Left leg
-                pygame.draw.rect(screen, SKIN, (372, 260, 18, 40))  # Right leg
+                # Draw enhanced Ahaan in center with more detail
+                ahaan_center_x, ahaan_center_y = WIDTH // 2, 220
                 
-                # Rotating gadgets around Ahaan
+                # Head with facial features
+                pygame.draw.ellipse(screen, SKIN, (ahaan_center_x - 20, 150, 40, 50))  # Head
+                pygame.draw.ellipse(screen, (240, 200, 160), (ahaan_center_x - 18, 152, 36, 46))  # Face highlight
+                
+                # Hair
+                pygame.draw.ellipse(screen, BROWN, (ahaan_center_x - 25, 145, 50, 25))
+                pygame.draw.circle(screen, (120, 80, 40), (ahaan_center_x - 15, 150), 8)  # Hair tuft left
+                pygame.draw.circle(screen, (120, 80, 40), (ahaan_center_x + 15, 150), 8)  # Hair tuft right
+                
+                # Eyes with sparkle
+                pygame.draw.ellipse(screen, WHITE, (ahaan_center_x - 12, 165, 8, 10))  # Left eye
+                pygame.draw.ellipse(screen, WHITE, (ahaan_center_x + 4, 165, 8, 10))  # Right eye
+                pygame.draw.circle(screen, BLACK, (ahaan_center_x - 8, 169), 3)  # Left pupil
+                pygame.draw.circle(screen, BLACK, (ahaan_center_x + 8, 169), 3)  # Right pupil
+                pygame.draw.circle(screen, WHITE, (ahaan_center_x - 7, 168), 1)  # Left shine
+                pygame.draw.circle(screen, WHITE, (ahaan_center_x + 9, 168), 1)  # Right shine
+                
+                # Smile
+                pygame.draw.arc(screen, BLACK, (ahaan_center_x - 8, 175, 16, 10), 0, math.pi, 3)
+                
+                # Body with shirt details
+                pygame.draw.rect(screen, GREEN, (ahaan_center_x - 25, 200, 50, 60))  # Body
+                pygame.draw.rect(screen, (100, 200, 100), (ahaan_center_x - 22, 202, 44, 56))  # Shirt highlight
+                pygame.draw.circle(screen, BLACK, (ahaan_center_x - 15, 210), 2)  # Button
+                pygame.draw.circle(screen, BLACK, (ahaan_center_x - 15, 225), 2)  # Button
+                pygame.draw.circle(screen, BLACK, (ahaan_center_x - 15, 240), 2)  # Button
+                
+                # Arms and legs with better proportions
+                pygame.draw.rect(screen, SKIN, (ahaan_center_x - 45, 220, 20, 40))  # Left arm
+                pygame.draw.rect(screen, SKIN, (ahaan_center_x + 25, 220, 20, 40))  # Right arm
+                pygame.draw.rect(screen, BLUE, (ahaan_center_x - 15, 260, 18, 40))  # Left leg (jeans)
+                pygame.draw.rect(screen, BLUE, (ahaan_center_x - 3, 260, 18, 40))  # Right leg (jeans)
+                
+                # Shoes
+                pygame.draw.ellipse(screen, BLACK, (ahaan_center_x - 18, 295, 22, 10))  # Left shoe
+                pygame.draw.ellipse(screen, BLACK, (ahaan_center_x - 6, 295, 22, 10))  # Right shoe
+                
+                # Rotating gadgets around Ahaan with enhanced graphics
                 gadget_radius = 120
-                center_x, center_y = WIDTH // 2, 220
                 
                 gadgets = [
                     ("Nintendo Switch", BLUE, RED),
@@ -1693,22 +1817,90 @@ def main():
                 
                 for i, (name, color1, color2) in enumerate(gadgets):
                     angle = cutscene_timer * 0.02 + i * (math.pi / 2)
-                    gadget_x = center_x + int(gadget_radius * math.cos(angle))
-                    gadget_y = center_y + int(gadget_radius * math.sin(angle))
+                    gadget_x = ahaan_center_x + int(gadget_radius * math.cos(angle))
+                    gadget_y = ahaan_center_y + int(gadget_radius * math.sin(angle))
+                    
+                    # Add floating sparkles around gadgets
+                    sparkle_offset = cutscene_timer * 0.1 + i
+                    for j in range(3):
+                        sparkle_angle = sparkle_offset + j * (2 * math.pi / 3)
+                        sparkle_x = gadget_x + int(25 * math.cos(sparkle_angle))
+                        sparkle_y = gadget_y + int(25 * math.sin(sparkle_angle))
+                        pygame.draw.circle(screen, YELLOW, (sparkle_x, sparkle_y), 2)
                     
                     if name == "Nintendo Switch":
-                        pygame.draw.rect(screen, BLACK, (gadget_x - 15, gadget_y - 8, 30, 16))
-                        pygame.draw.rect(screen, color1, (gadget_x - 20, gadget_y - 10, 10, 20))
-                        pygame.draw.rect(screen, color2, (gadget_x + 10, gadget_y - 10, 10, 20))
+                        # Main screen (black bezel)
+                        pygame.draw.rect(screen, BLACK, (gadget_x - 18, gadget_y - 12, 36, 24))
+                        # Screen (blue-gray)
+                        pygame.draw.rect(screen, (100, 120, 140), (gadget_x - 15, gadget_y - 9, 30, 18))
+                        # Screen reflection
+                        pygame.draw.rect(screen, (150, 170, 190), (gadget_x - 13, gadget_y - 7, 8, 4))
+                        # Left Joy-Con (blue)
+                        pygame.draw.rect(screen, color1, (gadget_x - 25, gadget_y - 15, 12, 30))
+                        pygame.draw.circle(screen, (50, 100, 200), (gadget_x - 19, gadget_y - 5), 4)  # Analog stick
+                        pygame.draw.rect(screen, (100, 150, 255), (gadget_x - 23, gadget_y + 5, 8, 3))  # D-pad
+                        # Right Joy-Con (red)
+                        pygame.draw.rect(screen, color2, (gadget_x + 13, gadget_y - 15, 12, 30))
+                        pygame.draw.circle(screen, (200, 100, 100), (gadget_x + 19, gadget_y - 5), 4)  # Analog stick
+                        # ABXY buttons
+                        pygame.draw.circle(screen, YELLOW, (gadget_x + 17, gadget_y + 2), 2)  # Y
+                        pygame.draw.circle(screen, GREEN, (gadget_x + 21, gadget_y + 6), 2)   # A
+                        pygame.draw.circle(screen, RED, (gadget_x + 21, gadget_y - 2), 2)     # X
+                        pygame.draw.circle(screen, BLUE, (gadget_x + 25, gadget_y + 2), 2)   # B
+                        
                     elif name == "PS5":
-                        pygame.draw.ellipse(screen, color1, (gadget_x - 10, gadget_y - 8, 20, 16))
-                        pygame.draw.circle(screen, color2, (gadget_x, gadget_y), 5)
+                        # PS5 controller shape (more detailed)
+                        pygame.draw.ellipse(screen, color1, (gadget_x - 15, gadget_y - 10, 30, 20))
+                        pygame.draw.ellipse(screen, (50, 50, 50), (gadget_x - 13, gadget_y - 8, 26, 16))
+                        # Analog sticks
+                        pygame.draw.circle(screen, (80, 80, 80), (gadget_x - 8, gadget_y - 2), 3)
+                        pygame.draw.circle(screen, (80, 80, 80), (gadget_x + 8, gadget_y + 2), 3)
+                        # D-pad
+                        pygame.draw.rect(screen, (120, 120, 120), (gadget_x - 10, gadget_y + 2, 6, 2))
+                        pygame.draw.rect(screen, (120, 120, 120), (gadget_x - 9, gadget_y + 1, 2, 6))
+                        # Face buttons (colored)
+                        pygame.draw.circle(screen, BLUE, (gadget_x + 6, gadget_y - 4), 2)    # X (blue)
+                        pygame.draw.circle(screen, GREEN, (gadget_x + 10, gadget_y), 2)      # Square (green)
+                        pygame.draw.circle(screen, RED, (gadget_x + 6, gadget_y + 4), 2)     # Circle (red)
+                        pygame.draw.circle(screen, (255, 100, 200), (gadget_x + 2, gadget_y), 2)  # Triangle (pink)
+                        # PlayStation logo
+                        pygame.draw.circle(screen, color2, (gadget_x, gadget_y), 4)
+                        
                     elif name == "Drums":
-                        pygame.draw.ellipse(screen, color1, (gadget_x - 12, gadget_y - 6, 24, 12))
-                        pygame.draw.ellipse(screen, color2, (gadget_x - 10, gadget_y - 4, 20, 8))
+                        # Drum set with multiple drums
+                        # Main snare drum
+                        pygame.draw.ellipse(screen, color1, (gadget_x - 12, gadget_y - 8, 24, 16))
+                        pygame.draw.ellipse(screen, color2, (gadget_x - 10, gadget_y - 6, 20, 12))
+                        pygame.draw.ellipse(screen, (200, 180, 120), (gadget_x - 8, gadget_y - 4, 16, 8))  # Drum head
+                        # Rim
+                        pygame.draw.ellipse(screen, (100, 50, 20), (gadget_x - 10, gadget_y - 6, 20, 12), 2)
+                        # Hi-hat (smaller drum)
+                        pygame.draw.ellipse(screen, (180, 180, 100), (gadget_x - 18, gadget_y - 12, 12, 8))
+                        # Drumsticks
+                        pygame.draw.line(screen, (160, 120, 80), (gadget_x - 5, gadget_y - 15), (gadget_x + 2, gadget_y - 8), 2)
+                        pygame.draw.line(screen, (160, 120, 80), (gadget_x + 5, gadget_y - 15), (gadget_x - 2, gadget_y - 8), 2)
+                        # Drumstick tips
+                        pygame.draw.circle(screen, (200, 160, 120), (gadget_x - 5, gadget_y - 15), 2)
+                        pygame.draw.circle(screen, (200, 160, 120), (gadget_x + 5, gadget_y - 15), 2)
+                        
                     elif name == "Apple Watch":
-                        pygame.draw.rect(screen, color1, (gadget_x - 8, gadget_y - 6, 16, 12))
-                        pygame.draw.rect(screen, color2, (gadget_x - 6, gadget_y - 4, 12, 8))
+                        # Watch body (rounded rectangle)
+                        pygame.draw.rect(screen, color1, (gadget_x - 10, gadget_y - 8, 20, 16))
+                        # Rounded corners effect
+                        pygame.draw.circle(screen, color1, (gadget_x - 6, gadget_y - 4), 4)
+                        pygame.draw.circle(screen, color1, (gadget_x + 6, gadget_y - 4), 4)
+                        pygame.draw.circle(screen, color1, (gadget_x - 6, gadget_y + 4), 4)
+                        pygame.draw.circle(screen, color1, (gadget_x + 6, gadget_y + 4), 4)
+                        # Screen with green activity rings
+                        pygame.draw.rect(screen, BLACK, (gadget_x - 8, gadget_y - 6, 16, 12))
+                        pygame.draw.circle(screen, color2, (gadget_x, gadget_y), 4, 2)      # Green ring
+                        pygame.draw.circle(screen, RED, (gadget_x, gadget_y), 6, 1)        # Red ring
+                        pygame.draw.circle(screen, BLUE, (gadget_x, gadget_y), 7, 1)       # Blue ring
+                        # Digital crown
+                        pygame.draw.rect(screen, (150, 150, 150), (gadget_x + 8, gadget_y - 2, 3, 4))
+                        # Watch band
+                        pygame.draw.rect(screen, (80, 80, 80), (gadget_x - 12, gadget_y - 2, 4, 4))
+                        pygame.draw.rect(screen, (80, 80, 80), (gadget_x + 8, gadget_y - 2, 4, 4))
                 
                 text1 = pygame.font.Font(None, 32).render("He LOVES gadgets and music!", True, WHITE)
                 text2 = pygame.font.Font(None, 28).render("Nintendo Switch • PS5 • Drums • Apple Watch", True, YELLOW)
@@ -1764,46 +1956,198 @@ def main():
                 title = pygame.font.Font(None, 48).render("But Ahaan faces challenges...", True, RED)
                 screen.blit(title, ((WIDTH - title.get_width()) // 2, 50))
                 
-                # Animated challenge icons floating menacingly
+                # Dark, ominous background with storm clouds
+                for i in range(0, WIDTH, 50):
+                    cloud_y = 80 + int(15 * math.sin(cutscene_timer * 0.05 + i * 0.01))
+                    pygame.draw.ellipse(screen, (60, 60, 80), (i, cloud_y, 60, 30))
+                    pygame.draw.ellipse(screen, (40, 40, 60), (i + 20, cloud_y + 5, 40, 20))
+                
+                # Lightning flashes occasionally
+                if int(cutscene_timer / 60) % 4 == 0 and (cutscene_timer % 60) < 10:
+                    # Lightning bolt
+                    lightning_points = [
+                        (WIDTH//2 - 20, 100),
+                        (WIDTH//2 - 10, 140),
+                        (WIDTH//2 + 5, 120),
+                        (WIDTH//2 + 15, 180),
+                        (WIDTH//2 + 25, 160),
+                        (WIDTH//2 + 35, 200)
+                    ]
+                    pygame.draw.lines(screen, YELLOW, False, lightning_points, 3)
+                    pygame.draw.lines(screen, WHITE, False, lightning_points, 1)
+                
+                # Animated challenge icons floating menacingly with enhanced details
                 challenges_y = 200
                 float_offset = cutscene_timer * 0.08
                 
-                # Homework stack
+                # Enhanced Homework stack with perspective and shadows
                 homework_x = 100 + int(15 * math.sin(float_offset))
+                # Shadow
+                pygame.draw.ellipse(screen, (50, 50, 50), (homework_x + 5, challenges_y + 45, 65, 15))
+                
                 for i in range(4):
-                    pygame.draw.rect(screen, WHITE, (homework_x, challenges_y + i * 3, 60, 40))
-                    pygame.draw.rect(screen, BLACK, (homework_x, challenges_y + i * 3, 60, 40), 2)
-                    # Scribbled text lines
+                    stack_offset = i * 4
+                    # Book spine (3D effect)
+                    pygame.draw.rect(screen, (180, 140, 100), (homework_x + stack_offset, challenges_y + stack_offset, 60, 40))
+                    pygame.draw.rect(screen, WHITE, (homework_x + 3 + stack_offset, challenges_y + 3 + stack_offset, 54, 34))
+                    pygame.draw.rect(screen, BLACK, (homework_x + stack_offset, challenges_y + stack_offset, 60, 40), 2)
+                    
+                    # Book details
+                    pygame.draw.rect(screen, RED, (homework_x + 5 + stack_offset, challenges_y + 5 + stack_offset, 50, 8))  # Title bar
+                    
+                    # Scribbled text lines with more detail
                     for j in range(3):
-                        pygame.draw.line(screen, BLACK, (homework_x + 5, challenges_y + i * 3 + 10 + j * 8), 
-                                       (homework_x + 50, challenges_y + i * 3 + 10 + j * 8), 1)
+                        line_y = challenges_y + stack_offset + 18 + j * 6
+                        # Main text line
+                        pygame.draw.line(screen, BLACK, (homework_x + 8 + stack_offset, line_y), 
+                                       (homework_x + 45 + stack_offset, line_y), 1)
+                        # Squiggly underlines for difficulty
+                        for k in range(0, 35, 3):
+                            under_y = line_y + 2 + int(2 * math.sin((k + cutscene_timer) * 0.3))
+                            pygame.draw.circle(screen, RED, (homework_x + 10 + k + stack_offset, under_y), 1)
                 
-                # Chores (mop and bucket)
-                chore_x = 300 + int(20 * math.sin(float_offset + 1))
-                pygame.draw.rect(screen, (100, 50, 0), (chore_x, challenges_y, 8, 60))  # Mop handle
-                pygame.draw.ellipse(screen, (200, 200, 200), (chore_x - 10, challenges_y + 50, 28, 20))  # Mop head
-                pygame.draw.rect(screen, BLUE, (chore_x + 20, challenges_y + 40, 25, 30))  # Bucket
-                
-                # Badminton racket (forced sports)
-                racket_x = 500 + int(12 * math.sin(float_offset + 2))
-                pygame.draw.rect(screen, (139, 69, 19), (racket_x, challenges_y, 6, 40))  # Handle
-                pygame.draw.ellipse(screen, (139, 69, 19), (racket_x - 15, challenges_y - 25, 36, 50))  # Racket head
-                # String pattern
+                # Math symbols floating around homework
                 for i in range(3):
-                    pygame.draw.line(screen, WHITE, (racket_x - 10, challenges_y - 15 + i * 8), 
-                                   (racket_x + 16, challenges_y - 15 + i * 8), 1)
-                    pygame.draw.line(screen, WHITE, (racket_x - 5 + i * 6, challenges_y - 20), 
-                                   (racket_x - 5 + i * 6, challenges_y + 10), 1)
+                    symbol_angle = cutscene_timer * 0.1 + i * 2
+                    symbol_x = homework_x + 30 + int(25 * math.cos(symbol_angle))
+                    symbol_y = challenges_y + 20 + int(15 * math.sin(symbol_angle))
+                    symbols = ["∑", "∫", "π"]
+                    symbol_font = pygame.font.Font(None, 24)
+                    symbol_surf = symbol_font.render(symbols[i], True, RED)
+                    screen.blit(symbol_surf, (symbol_x, symbol_y))
                 
-                # Shower head
-                shower_x = 650 + int(18 * math.sin(float_offset + 3))
-                pygame.draw.rect(screen, (150, 150, 150), (shower_x, challenges_y, 40, 20))
-                # Water drops
+                # Enhanced Chores (mop and bucket) with cleaning supplies
+                chore_x = 300 + int(20 * math.sin(float_offset + 1))
+                # Shadow
+                pygame.draw.ellipse(screen, (50, 50, 50), (chore_x - 5, challenges_y + 65, 40, 10))
+                
+                # Mop handle with wood grain
+                pygame.draw.rect(screen, (120, 80, 40), (chore_x, challenges_y, 8, 60))
+                for grain in range(challenges_y, challenges_y + 60, 8):
+                    pygame.draw.line(screen, (100, 60, 20), (chore_x + 1, grain), (chore_x + 6, grain), 1)
+                
+                # Mop head with individual strands
+                pygame.draw.ellipse(screen, (220, 220, 200), (chore_x - 10, challenges_y + 50, 28, 20))
+                for strand in range(8):
+                    strand_x = chore_x - 8 + strand * 3
+                    strand_sway = int(3 * math.sin(cutscene_timer * 0.2 + strand))
+                    pygame.draw.line(screen, (200, 200, 180), 
+                                   (strand_x, challenges_y + 55), 
+                                   (strand_x + strand_sway, challenges_y + 68), 2)
+                
+                # Bucket with water and bubbles
+                pygame.draw.rect(screen, (100, 150, 200), (chore_x + 20, challenges_y + 40, 25, 30))
+                pygame.draw.rect(screen, (80, 120, 180), (chore_x + 20, challenges_y + 40, 25, 5))  # Rim
+                # Water surface
+                pygame.draw.rect(screen, (150, 200, 255), (chore_x + 22, challenges_y + 45, 21, 20))
+                # Bubbles
+                for bubble in range(4):
+                    bubble_x = chore_x + 25 + bubble * 4
+                    bubble_y = challenges_y + 50 + int(3 * math.sin(cutscene_timer * 0.3 + bubble))
+                    pygame.draw.circle(screen, WHITE, (bubble_x, bubble_y), 2)
+                
+                # Soap bottle
+                pygame.draw.rect(screen, (255, 200, 100), (chore_x + 48, challenges_y + 50, 8, 15))
+                pygame.draw.rect(screen, (200, 150, 50), (chore_x + 49, challenges_y + 48, 6, 4))  # Cap
+                
+                # Enhanced Badminton racket with more detail
+                racket_x = 500 + int(12 * math.sin(float_offset + 2))
+                # Shadow
+                pygame.draw.ellipse(screen, (50, 50, 50), (racket_x - 10, challenges_y + 45, 25, 8))
+                
+                # Handle with grip texture
+                pygame.draw.rect(screen, (120, 80, 40), (racket_x, challenges_y, 6, 40))
+                # Grip bands
+                for band in range(challenges_y + 5, challenges_y + 35, 4):
+                    pygame.draw.rect(screen, (80, 50, 20), (racket_x, band, 6, 2))
+                
+                # Racket head frame with metallic look
+                pygame.draw.ellipse(screen, (200, 180, 160), (racket_x - 15, challenges_y - 25, 36, 50))
+                pygame.draw.ellipse(screen, (160, 140, 120), (racket_x - 13, challenges_y - 23, 32, 46), 3)
+                
+                # String pattern (more detailed crosshatch)
+                for i in range(5):
+                    string_x = racket_x - 10 + i * 5
+                    pygame.draw.line(screen, WHITE, (string_x, challenges_y - 20), (string_x, challenges_y + 5), 1)
                 for i in range(6):
-                    drop_x = shower_x + 5 + i * 6
-                    for j in range(4):
-                        drop_y = challenges_y + 25 + j * 15 + int(10 * math.sin(cutscene_timer * 0.3 + i + j))
-                        pygame.draw.circle(screen, (0, 150, 255), (drop_x, drop_y), 2)
+                    string_y = challenges_y - 18 + i * 4
+                    pygame.draw.line(screen, WHITE, (racket_x - 12, string_y), (racket_x + 18, string_y), 1)
+                
+                # Shuttlecock in mid-air
+                shuttle_x = racket_x + 25 + int(10 * math.cos(cutscene_timer * 0.2))
+                shuttle_y = challenges_y - 35 + int(8 * math.sin(cutscene_timer * 0.15))
+                pygame.draw.ellipse(screen, WHITE, (shuttle_x, shuttle_y, 8, 12))
+                # Feathers
+                for feather in range(4):
+                    feather_angle = feather * (math.pi / 2)
+                    feather_end_x = shuttle_x + 4 + int(6 * math.cos(feather_angle))
+                    feather_end_y = shuttle_y + int(6 * math.sin(feather_angle))
+                    pygame.draw.line(screen, WHITE, (shuttle_x + 4, shuttle_y), (feather_end_x, feather_end_y), 1)
+                
+                # Enhanced Shower head with realistic water effects
+                shower_x = 650 + int(18 * math.sin(float_offset + 3))
+                # Shadow
+                pygame.draw.ellipse(screen, (50, 50, 50), (shower_x + 5, challenges_y + 85, 45, 10))
+                
+                # Shower head body with metallic shine
+                pygame.draw.rect(screen, (180, 180, 180), (shower_x, challenges_y, 40, 20))
+                pygame.draw.rect(screen, (220, 220, 220), (shower_x + 2, challenges_y + 2, 36, 4))  # Top highlight
+                pygame.draw.rect(screen, (140, 140, 140), (shower_x, challenges_y + 16, 40, 4))     # Bottom shadow
+                
+                # Shower holes in a realistic pattern
+                for row in range(3):
+                    for col in range(6):
+                        hole_x = shower_x + 6 + col * 5
+                        hole_y = challenges_y + 5 + row * 4
+                        pygame.draw.circle(screen, (100, 100, 100), (hole_x, hole_y), 1)
+                
+                # Realistic water stream with varying droplet sizes
+                for i in range(8):
+                    drop_x = shower_x + 5 + i * 4
+                    for j in range(6):
+                        # Vary droplet fall speed and size
+                        fall_speed = 8 + j * 4
+                        drop_y = challenges_y + 25 + j * fall_speed + int(5 * math.sin(cutscene_timer * 0.4 + i))
+                        drop_size = max(1, 3 - j // 2)  # Smaller drops as they fall
+                        # Water color with transparency effect
+                        water_alpha = max(100, 255 - j * 30)
+                        pygame.draw.circle(screen, (100, 180, 255), (drop_x, drop_y), drop_size)
+                        # Add white highlight to drops
+                        if drop_size > 1:
+                            pygame.draw.circle(screen, WHITE, (drop_x - 1, drop_y - 1), 1)
+                
+                # Steam effect
+                for steam in range(12):
+                    steam_x = shower_x + 10 + steam * 3 + int(5 * math.sin(cutscene_timer * 0.1 + steam))
+                    steam_y = challenges_y + 80 + int(20 * math.cos(cutscene_timer * 0.05 + steam))
+                    steam_size = 3 + int(2 * math.sin(cutscene_timer * 0.08 + steam))
+                    pygame.draw.circle(screen, (220, 220, 255), (steam_x, steam_y), steam_size)
+                
+                # Add threatening red glow around all challenges
+                glow_intensity = int(50 + 30 * math.sin(cutscene_timer * 0.1))
+                glow_color = (255, 100, 100)
+                
+                # Create ominous aura around each challenge
+                challenge_positions = [
+                    (homework_x + 30, challenges_y + 20),
+                    (chore_x + 15, challenges_y + 30),
+                    (racket_x, challenges_y),
+                    (shower_x + 20, challenges_y + 10)
+                ]
+                
+                for pos_x, pos_y in challenge_positions:
+                    for radius in range(60, 40, -5):
+                        alpha = max(0, glow_intensity - (60 - radius) * 3)
+                        # Create glowing ring effect
+                        for angle in range(0, 360, 15):
+                            ring_x = pos_x + int(radius * math.cos(math.radians(angle)))
+                            ring_y = pos_y + int(radius * math.sin(math.radians(angle)))
+                            if 0 <= ring_x < WIDTH and 0 <= ring_y < HEIGHT:
+                                # Use lighter colors instead of alpha
+                                bright_color = (min(255, glow_color[0] + alpha//8), 
+                                              min(255, glow_color[1] + alpha//8), 
+                                              min(255, glow_color[2] + alpha//8))
+                                pygame.draw.circle(screen, bright_color, (ring_x, ring_y), 2)
                 
                 text1 = pygame.font.Font(None, 32).render("Homework, chores, forced badminton, showers...", True, WHITE)
                 text2 = pygame.font.Font(None, 28).render("Parents yelling like villains!", True, RED)
@@ -1815,33 +2159,200 @@ def main():
                 title = pygame.font.Font(None, 48).render("One peaceful day...", True, GREEN)
                 screen.blit(title, ((WIDTH - title.get_width()) // 2, 50))
                 
-                # Room background
-                pygame.draw.rect(screen, (100, 80, 60), (50, 150, WIDTH - 100, HEIGHT - 200))  # Room
-                pygame.draw.rect(screen, (80, 60, 40), (50, 150, WIDTH - 100, HEIGHT - 200), 5)  # Room border
+                # Enhanced room background with depth and details
+                # Floor with wood planks
+                floor_y = HEIGHT - 50
+                for plank in range(0, WIDTH, 60):
+                    pygame.draw.rect(screen, (120, 90, 60), (plank, floor_y, 58, 50))
+                    pygame.draw.rect(screen, (100, 70, 40), (plank, floor_y, 58, 50), 2)
+                    # Wood grain lines
+                    for grain in range(floor_y + 5, floor_y + 45, 8):
+                        pygame.draw.line(screen, (80, 50, 20), (plank + 5, grain), (plank + 53, grain), 1)
                 
-                # Ahaan sitting and gaming
+                # Walls with texture
+                pygame.draw.rect(screen, (140, 120, 100), (50, 150, WIDTH - 100, floor_y - 150))  # Main wall
+                pygame.draw.rect(screen, (120, 100, 80), (50, 150, WIDTH - 100, floor_y - 150), 5)   # Wall border
+                
+                # Wall decorations
+                # Picture frame
+                pygame.draw.rect(screen, (80, 60, 40), (WIDTH - 150, 170, 80, 60))
+                pygame.draw.rect(screen, (200, 180, 160), (WIDTH - 145, 175, 70, 50))
+                pygame.draw.rect(screen, (50, 100, 200), (WIDTH - 140, 180, 60, 40))  # Picture (sky)
+                pygame.draw.circle(screen, YELLOW, (WIDTH - 120, 190), 8)             # Sun in picture
+                
+                # Window with curtains
+                pygame.draw.rect(screen, (150, 200, 255), (100, 160, 60, 80))  # Window (sky view)
+                pygame.draw.rect(screen, (80, 60, 40), (100, 160, 60, 80), 4)  # Window frame
+                # Window cross
+                pygame.draw.line(screen, (80, 60, 40), (130, 160), (130, 240), 3)
+                pygame.draw.line(screen, (80, 60, 40), (100, 200), (160, 200), 3)
+                # Curtains
+                pygame.draw.rect(screen, (200, 100, 100), (85, 155, 15, 90))   # Left curtain
+                pygame.draw.rect(screen, (200, 100, 100), (160, 155, 15, 90))  # Right curtain
+                
+                # Bookshelf
+                pygame.draw.rect(screen, (100, 70, 40), (600, 180, 80, 120))
+                for shelf in range(200, 280, 25):
+                    pygame.draw.rect(screen, (80, 50, 20), (600, shelf, 80, 3))
+                # Books on shelves
+                book_colors = [(200, 100, 100), (100, 200, 100), (100, 100, 200), (200, 200, 100)]
+                for i, shelf_y in enumerate([185, 210, 235, 260]):
+                    for j in range(5):
+                        book_x = 605 + j * 14
+                        book_color = book_colors[(i + j) % len(book_colors)]
+                        pygame.draw.rect(screen, book_color, (book_x, shelf_y, 12, 20))
+                        pygame.draw.rect(screen, (50, 50, 50), (book_x, shelf_y, 12, 20), 1)
+                
+                # Gaming setup - TV/Monitor
+                pygame.draw.rect(screen, BLACK, (WIDTH//2 - 80, 180, 160, 90))      # TV screen
+                pygame.draw.rect(screen, (40, 40, 40), (WIDTH//2 - 85, 175, 170, 100))  # TV bezel
+                pygame.draw.rect(screen, (20, 20, 20), (WIDTH//2 - 10, 270, 20, 15))     # TV stand
+                
+                # Game on TV screen (Mario-style game)
+                pygame.draw.rect(screen, (100, 150, 255), (WIDTH//2 - 75, 185, 150, 80))  # Sky background
+                # Clouds on TV
+                for cloud in range(3):
+                    cloud_x = WIDTH//2 - 60 + cloud * 40 + int(5 * math.sin(cutscene_timer * 0.1 + cloud))
+                    pygame.draw.ellipse(screen, WHITE, (cloud_x, 190 + cloud * 5, 25, 15))
+                # Ground on TV
+                pygame.draw.rect(screen, GREEN, (WIDTH//2 - 75, 245, 150, 20))
+                # Mario character on TV
+                mario_x = WIDTH//2 - 30 + int(10 * math.sin(cutscene_timer * 0.2))
+                pygame.draw.rect(screen, RED, (mario_x, 235, 12, 10))        # Mario body
+                pygame.draw.circle(screen, SKIN, (mario_x + 6, 230), 4)     # Mario head
+                pygame.draw.rect(screen, BLUE, (mario_x + 2, 240, 8, 5))    # Mario legs
+                
+                # Cozy lighting - lamp
+                pygame.draw.rect(screen, (120, 100, 80), (520, 200, 8, 40))   # Lamp post
+                pygame.draw.ellipse(screen, (255, 240, 200), (510, 185, 28, 20))  # Lamp shade
+                # Light glow effect
+                for radius in range(40, 20, -4):
+                    glow_alpha = max(0, 60 - (40 - radius) * 3)
+                    # Create soft glow around lamp
+                    pygame.draw.circle(screen, (255, 240, 150), (524, 195), radius, 1)
+                
+                # Carpet/rug under gaming area
+                pygame.draw.ellipse(screen, (150, 100, 200), (WIDTH//2 - 120, floor_y - 40, 240, 60))
+                pygame.draw.ellipse(screen, (130, 80, 180), (WIDTH//2 - 115, floor_y - 35, 230, 50))
+                # Rug pattern
+                for ring in range(3):
+                    ring_radius = 80 + ring * 15
+                    pygame.draw.ellipse(screen, (100 + ring * 20, 60 + ring * 10, 160 + ring * 10), 
+                                      (WIDTH//2 - ring_radius//2, floor_y - 20 - ring * 2, ring_radius, 30), 2)
+                
+                # Enhanced Ahaan sitting and gaming with better proportions
                 ahaan_x, ahaan_y = WIDTH // 2 - 20, 250
-                pygame.draw.ellipse(screen, SKIN, (ahaan_x, ahaan_y, 40, 50))  # Head
-                pygame.draw.rect(screen, BLUE, (ahaan_x - 10, ahaan_y + 50, 60, 70))  # Body sitting
-                pygame.draw.rect(screen, SKIN, (ahaan_x - 5, ahaan_y + 110, 25, 40))  # Left leg
-                pygame.draw.rect(screen, SKIN, (ahaan_x + 30, ahaan_y + 110, 25, 40))  # Right leg
                 
-                # Nintendo Switch in hands with animated screen
-                switch_x, switch_y = ahaan_x + 10, ahaan_y + 80
-                pygame.draw.rect(screen, BLACK, (switch_x, switch_y, 40, 25))  # Switch body
-                pygame.draw.rect(screen, BLUE, (switch_x - 8, switch_y + 3, 12, 20))  # Left Joy-Con
-                pygame.draw.rect(screen, RED, (switch_x + 36, switch_y + 3, 12, 20))  # Right Joy-Con
+                # Gaming chair/cushion
+                pygame.draw.ellipse(screen, (80, 60, 40), (ahaan_x - 25, ahaan_y + 45, 90, 45))  # Chair base
+                pygame.draw.rect(screen, (100, 80, 60), (ahaan_x - 20, ahaan_y + 30, 80, 20))    # Chair back
                 
-                # Animated screen content
-                screen_color = [GREEN, YELLOW, BLUE, RED][int(cutscene_timer / 30) % 4]
-                pygame.draw.rect(screen, screen_color, (switch_x + 3, switch_y + 3, 34, 19))
+                # Ahaan's body with more detail
+                # Head with detailed features
+                pygame.draw.ellipse(screen, SKIN, (ahaan_x, ahaan_y, 40, 50))
+                pygame.draw.ellipse(screen, (240, 200, 160), (ahaan_x + 2, ahaan_y + 2, 36, 46))  # Face highlight
                 
-                # Happy expression
-                # Eyes
-                pygame.draw.circle(screen, BLACK, (ahaan_x + 12, ahaan_y + 18), 3)
-                pygame.draw.circle(screen, BLACK, (ahaan_x + 28, ahaan_y + 18), 3)
-                # Smile
-                pygame.draw.arc(screen, BLACK, (ahaan_x + 8, ahaan_y + 25, 24, 15), 0, math.pi, 3)
+                # Hair
+                pygame.draw.ellipse(screen, BROWN, (ahaan_x - 5, ahaan_y - 5, 50, 30))
+                pygame.draw.circle(screen, (120, 80, 40), (ahaan_x + 5, ahaan_y), 8)    # Hair tuft left
+                pygame.draw.circle(screen, (120, 80, 40), (ahaan_x + 35, ahaan_y), 8)   # Hair tuft right
+                
+                # Concentrated gaming expression
+                pygame.draw.ellipse(screen, WHITE, (ahaan_x + 8, ahaan_y + 15, 8, 10))   # Left eye
+                pygame.draw.ellipse(screen, WHITE, (ahaan_x + 24, ahaan_y + 15, 8, 10))  # Right eye
+                pygame.draw.circle(screen, BLACK, (ahaan_x + 11, ahaan_y + 19), 3)       # Left pupil
+                pygame.draw.circle(screen, BLACK, (ahaan_x + 27, ahaan_y + 19), 3)       # Right pupil
+                pygame.draw.circle(screen, WHITE, (ahaan_x + 12, ahaan_y + 18), 1)       # Left eye shine
+                pygame.draw.circle(screen, WHITE, (ahaan_x + 28, ahaan_y + 18), 1)       # Right eye shine
+                
+                # Concentrated expression - slightly furrowed brow
+                pygame.draw.line(screen, (200, 160, 120), (ahaan_x + 6, ahaan_y + 12), (ahaan_x + 12, ahaan_y + 14), 2)
+                pygame.draw.line(screen, (200, 160, 120), (ahaan_x + 28, ahaan_y + 14), (ahaan_x + 34, ahaan_y + 12), 2)
+                
+                # Slight smile of contentment
+                pygame.draw.arc(screen, BLACK, (ahaan_x + 12, ahaan_y + 28, 16, 8), 0, math.pi, 2)
+                
+                # Body in relaxed gaming position
+                pygame.draw.rect(screen, BLUE, (ahaan_x - 10, ahaan_y + 50, 60, 70))     # Main shirt
+                pygame.draw.rect(screen, (100, 150, 255), (ahaan_x - 8, ahaan_y + 52, 56, 66))  # Shirt highlight
+                
+                # Arms holding the Nintendo Switch
+                pygame.draw.rect(screen, SKIN, (ahaan_x - 15, ahaan_y + 60, 20, 35))     # Left arm
+                pygame.draw.rect(screen, SKIN, (ahaan_x + 35, ahaan_y + 60, 20, 35))     # Right arm
+                
+                # Legs in comfortable position
+                pygame.draw.rect(screen, BLUE, (ahaan_x - 5, ahaan_y + 110, 25, 40))     # Left leg (jeans)
+                pygame.draw.rect(screen, BLUE, (ahaan_x + 20, ahaan_y + 110, 25, 40))    # Right leg (jeans)
+                
+                # Socks and feet
+                pygame.draw.rect(screen, WHITE, (ahaan_x - 3, ahaan_y + 145, 21, 15))    # Left sock
+                pygame.draw.rect(screen, WHITE, (ahaan_x + 22, ahaan_y + 145, 21, 15))   # Right sock
+                
+                # Enhanced Nintendo Switch with detailed design
+                switch_x, switch_y = ahaan_x + 10, ahaan_y + 75
+                
+                # Switch main body (more detailed)
+                pygame.draw.rect(screen, BLACK, (switch_x, switch_y, 40, 25))
+                pygame.draw.rect(screen, (40, 40, 40), (switch_x + 1, switch_y + 1, 38, 23))  # Bezel
+                
+                # Left Joy-Con with enhanced detail
+                pygame.draw.rect(screen, BLUE, (switch_x - 12, switch_y + 1, 14, 23))
+                pygame.draw.rect(screen, (100, 150, 255), (switch_x - 11, switch_y + 2, 12, 21))  # Highlight
+                pygame.draw.circle(screen, (50, 100, 200), (switch_x - 6, switch_y + 8), 3)       # Analog stick
+                pygame.draw.rect(screen, (80, 120, 255), (switch_x - 9, switch_y + 15, 6, 2))     # D-pad horizontal
+                pygame.draw.rect(screen, (80, 120, 255), (switch_x - 7, switch_y + 13, 2, 6))     # D-pad vertical
+                
+                # Right Joy-Con with enhanced detail  
+                pygame.draw.rect(screen, RED, (switch_x + 38, switch_y + 1, 14, 23))
+                pygame.draw.rect(screen, (255, 100, 100), (switch_x + 39, switch_y + 2, 12, 21))  # Highlight
+                pygame.draw.circle(screen, (200, 50, 50), (switch_x + 45, switch_y + 8), 3)       # Analog stick
+                # ABXY buttons with proper colors
+                pygame.draw.circle(screen, YELLOW, (switch_x + 43, switch_y + 13), 1.5)  # Y button
+                pygame.draw.circle(screen, GREEN, (switch_x + 47, switch_y + 16), 1.5)   # A button  
+                pygame.draw.circle(screen, BLUE, (switch_x + 49, switch_y + 13), 1.5)    # X button
+                pygame.draw.circle(screen, RED, (switch_x + 47, switch_y + 10), 1.5)     # B button
+                
+                # Animated game screen with realistic game graphics
+                game_colors = [
+                    (100, 200, 100),  # Green (grass level)
+                    (100, 150, 255),  # Blue (water level)  
+                    (255, 200, 100),  # Orange (desert level)
+                    (200, 100, 255)   # Purple (night level)
+                ]
+                current_color = game_colors[int(cutscene_timer / 60) % len(game_colors)]
+                
+                # Game screen background
+                pygame.draw.rect(screen, current_color, (switch_x + 3, switch_y + 3, 34, 19))
+                
+                # Mini game character on screen
+                char_x = switch_x + 8 + int(8 * math.sin(cutscene_timer * 0.1))
+                pygame.draw.rect(screen, RED, (char_x, switch_y + 12, 4, 6))      # Game character body
+                pygame.draw.circle(screen, SKIN, (char_x + 2, switch_y + 10), 2)  # Game character head
+                
+                # Game UI elements on screen
+                pygame.draw.rect(screen, WHITE, (switch_x + 25, switch_y + 5, 12, 3))  # Health bar background
+                pygame.draw.rect(screen, GREEN, (switch_x + 26, switch_y + 6, 8, 1))   # Health bar
+                
+                # Screen reflection effect
+                pygame.draw.rect(screen, (200, 200, 255), (switch_x + 4, switch_y + 4, 8, 3))  # Screen glare
+                
+                # Soft glow from the Switch screen
+                for glow in range(3):
+                    glow_color = (*current_color, 30 + glow * 10)
+                    # Create subtle glow effect around the switch
+                    pygame.draw.rect(screen, current_color, 
+                                   (switch_x - 2 - glow, switch_y - 2 - glow, 
+                                    44 + glow * 2, 29 + glow * 2), 1)
+                
+                # Content expression showing gaming enjoyment
+                # Add slight head movement for immersion
+                head_sway = int(2 * math.sin(cutscene_timer * 0.05))
+                
+                # Peaceful room ambiance - floating dust particles in light
+                for particle in range(15):
+                    particle_x = 100 + (particle * 47 + cutscene_timer) % (WIDTH - 200)
+                    particle_y = 160 + int(30 * math.sin(cutscene_timer * 0.03 + particle))
+                    pygame.draw.circle(screen, (255, 255, 200), (particle_x, particle_y), 1)
                 
                 text1 = pygame.font.Font(None, 36).render("Ahaan was gaming on his Nintendo Switch", True, WHITE)
                 text2 = pygame.font.Font(None, 32).render("Peaceful and happy...", True, GREEN)
@@ -1973,51 +2484,197 @@ def main():
                 title = pygame.font.Font(None, 48).render("The Chase is On!", True, GOLDEN)
                 screen.blit(title, ((WIDTH - title.get_width()) // 2, 50))
                 
-                # Ahaan running
+                # Dynamic background with motion blur effect
+                # Ground with motion lines
+                ground_y = 320
+                for i in range(0, WIDTH + 50, 40):
+                    motion_x = i - int(cutscene_timer * 2) % 40
+                    pygame.draw.rect(screen, (80, 120, 80), (motion_x, ground_y, 35, 80))      # Grass patches
+                    pygame.draw.rect(screen, (60, 100, 60), (motion_x + 2, ground_y + 2, 31, 76))  # Grass highlight
+                    
+                # Background hills with parallax effect
+                for hill in range(3):
+                    hill_speed = 0.5 + hill * 0.3
+                    hill_x = WIDTH - 200 - int(cutscene_timer * hill_speed) % (WIDTH + 400)
+                    hill_y = 200 + hill * 20
+                    hill_color = (100 - hill * 20, 150 - hill * 15, 100 - hill * 10)
+                    pygame.draw.ellipse(screen, hill_color, (hill_x, hill_y, 300, 100))
+                
+                # Fast-moving clouds
+                for cloud in range(4):
+                    cloud_speed = 1.5 + cloud * 0.5
+                    cloud_x = WIDTH - int(cutscene_timer * cloud_speed) % (WIDTH + 100)
+                    cloud_y = 100 + cloud * 15
+                    pygame.draw.ellipse(screen, WHITE, (cloud_x, cloud_y, 60, 30))
+                    pygame.draw.ellipse(screen, WHITE, (cloud_x + 20, cloud_y - 5, 40, 25))
+                
+                # Enhanced Ahaan running with detailed animation
                 ahaan_x = 100 + int(cutscene_timer * 1.5)
                 ahaan_y = 250
                 
-                # Running animation
-                pygame.draw.ellipse(screen, SKIN, (ahaan_x, ahaan_y, 35, 45))  # Head
-                pygame.draw.rect(screen, BLUE, (ahaan_x - 5, ahaan_y + 45, 45, 60))  # Body
+                # Motion blur trail effect
+                for trail in range(5):
+                    trail_alpha = 255 - trail * 50
+                    trail_x = ahaan_x - trail * 8
+                    if trail_alpha > 0:
+                        # Faded body trail (using lighter colors instead of alpha)
+                        trail_skin = (min(255, SKIN[0] + trail * 10), min(255, SKIN[1] + trail * 10), min(255, SKIN[2] + trail * 10))
+                        trail_blue = (min(255, BLUE[0] + trail * 20), min(255, BLUE[1] + trail * 20), min(255, BLUE[2] + trail * 20))
+                        pygame.draw.ellipse(screen, trail_skin, (trail_x + trail*2, ahaan_y + trail, 35-trail*2, 45-trail*2))
+                        pygame.draw.rect(screen, trail_blue, (trail_x - 5 + trail*2, ahaan_y + 45 + trail, 45-trail*4, 60-trail*4))
                 
-                # Animated running legs
-                leg_cycle = cutscene_timer * 0.4
-                left_leg_offset = int(15 * math.sin(leg_cycle))
-                right_leg_offset = int(15 * math.sin(leg_cycle + math.pi))
+                # Main character with enhanced detail
+                # Head with hair flowing from speed
+                pygame.draw.ellipse(screen, SKIN, (ahaan_x, ahaan_y, 35, 45))
+                pygame.draw.ellipse(screen, (240, 200, 160), (ahaan_x + 2, ahaan_y + 2, 31, 41))  # Face highlight
                 
-                pygame.draw.rect(screen, SKIN, (ahaan_x + 5, ahaan_y + 105, 12, 35 + left_leg_offset))
-                pygame.draw.rect(screen, SKIN, (ahaan_x + 23, ahaan_y + 105, 12, 35 + right_leg_offset))
+                # Hair with wind effect
+                hair_flow = int(8 * math.sin(cutscene_timer * 0.3))
+                pygame.draw.ellipse(screen, BROWN, (ahaan_x - 8 - hair_flow, ahaan_y - 5, 45 + hair_flow, 25))
+                pygame.draw.circle(screen, (120, 80, 40), (ahaan_x + 5 - hair_flow//2, ahaan_y), 8)   # Hair tuft
+                pygame.draw.circle(screen, (120, 80, 40), (ahaan_x + 25 - hair_flow//3, ahaan_y + 2), 8)  # Hair tuft
                 
-                # Arms pumping
-                arm_cycle = cutscene_timer * 0.4
-                left_arm_y = ahaan_y + 55 + int(10 * math.sin(arm_cycle))
-                right_arm_y = ahaan_y + 55 + int(10 * math.sin(arm_cycle + math.pi))
+                # Dynamic facial expression showing determination and effort
+                # Eyes with focus
+                pygame.draw.ellipse(screen, WHITE, (ahaan_x + 6, ahaan_y + 15, 8, 10))
+                pygame.draw.ellipse(screen, WHITE, (ahaan_x + 21, ahaan_y + 15, 8, 10))
+                pygame.draw.circle(screen, BLACK, (ahaan_x + 9, ahaan_y + 19), 3)
+                pygame.draw.circle(screen, BLACK, (ahaan_x + 24, ahaan_y + 19), 3)
+                # Intense gaze
+                pygame.draw.circle(screen, WHITE, (ahaan_x + 10, ahaan_y + 18), 1)
+                pygame.draw.circle(screen, WHITE, (ahaan_x + 25, ahaan_y + 18), 1)
                 
-                pygame.draw.rect(screen, SKIN, (ahaan_x - 15, left_arm_y, 15, 25))  # Left arm
-                pygame.draw.rect(screen, SKIN, (ahaan_x + 35, right_arm_y, 15, 25))  # Right arm
+                # Determined eyebrows
+                pygame.draw.line(screen, (200, 160, 120), (ahaan_x + 4, ahaan_y + 12), (ahaan_x + 10, ahaan_y + 14), 2)
+                pygame.draw.line(screen, (200, 160, 120), (ahaan_x + 25, ahaan_y + 14), (ahaan_x + 31, ahaan_y + 12), 2)
                 
-                # Determined expression
-                pygame.draw.circle(screen, BLACK, (ahaan_x + 12, ahaan_y + 18), 3)  # Eyes
-                pygame.draw.circle(screen, BLACK, (ahaan_x + 23, ahaan_y + 18), 3)
-                pygame.draw.line(screen, BLACK, (ahaan_x + 10, ahaan_y + 30), (ahaan_x + 25, ahaan_y + 30), 3)  # Determined mouth
+                # Open mouth showing effort
+                pygame.draw.ellipse(screen, BLACK, (ahaan_x + 12, ahaan_y + 28, 8, 6))
+                pygame.draw.ellipse(screen, (200, 100, 100), (ahaan_x + 13, ahaan_y + 29, 6, 4))  # Tongue
                 
-                # Speed lines
-                for i in range(5):
-                    line_x = ahaan_x - 30 - i * 15
-                    pygame.draw.line(screen, WHITE, (line_x, ahaan_y + 60 + i * 8), (line_x + 20, ahaan_y + 65 + i * 8), 3)
+                # Body with athletic shirt
+                pygame.draw.rect(screen, BLUE, (ahaan_x - 5, ahaan_y + 45, 45, 60))
+                pygame.draw.rect(screen, (100, 150, 255), (ahaan_x - 3, ahaan_y + 47, 41, 56))  # Shirt highlight
+                # Racing stripes on shirt
+                pygame.draw.rect(screen, WHITE, (ahaan_x + 5, ahaan_y + 50, 3, 50))
+                pygame.draw.rect(screen, RED, (ahaan_x + 27, ahaan_y + 50, 3, 50))
                 
-                # Floating Nintendo Switch parts in the distance
-                for i, (color, offset_x, offset_y) in enumerate([(BLUE, -80, -30), (BLACK, 0, -50), (RED, 80, -20)]):
-                    part_x = ahaan_x + 200 + offset_x + int(20 * math.sin(cutscene_timer * 0.1 + i))
-                    part_y = 180 + offset_y + int(15 * math.cos(cutscene_timer * 0.1 + i))
+                # Enhanced running leg animation with realistic movement
+                leg_cycle = cutscene_timer * 0.6  # Faster leg movement for urgency
+                left_leg_offset = int(20 * math.sin(leg_cycle))
+                right_leg_offset = int(20 * math.sin(leg_cycle + math.pi))
+                
+                # Left leg with knee bend
+                left_thigh_angle = math.sin(leg_cycle) * 0.3
+                left_leg_x = ahaan_x + 5 + int(5 * math.cos(left_thigh_angle))
+                left_leg_y = ahaan_y + 105
+                pygame.draw.rect(screen, BLUE, (left_leg_x, left_leg_y, 12, 25))  # Thigh
+                pygame.draw.rect(screen, SKIN, (left_leg_x + 2, left_leg_y + 20, 8, 15 + max(0, left_leg_offset)))  # Shin
+                
+                # Right leg with knee bend
+                right_thigh_angle = math.sin(leg_cycle + math.pi) * 0.3
+                right_leg_x = ahaan_x + 23 + int(5 * math.cos(right_thigh_angle))
+                right_leg_y = ahaan_y + 105
+                pygame.draw.rect(screen, BLUE, (right_leg_x, right_leg_y, 12, 25))  # Thigh
+                pygame.draw.rect(screen, SKIN, (right_leg_x + 2, right_leg_y + 20, 8, 15 + max(0, right_leg_offset)))  # Shin
+                
+                # Running shoes with motion
+                shoe_bounce = int(3 * math.sin(leg_cycle * 2))
+                pygame.draw.ellipse(screen, BLACK, (left_leg_x, left_leg_y + 35 + left_leg_offset + shoe_bounce, 15, 8))
+                pygame.draw.ellipse(screen, BLACK, (right_leg_x, right_leg_y + 35 + right_leg_offset - shoe_bounce, 15, 8))
+                # Shoe highlights
+                pygame.draw.ellipse(screen, (80, 80, 80), (left_leg_x + 2, left_leg_y + 36 + left_leg_offset + shoe_bounce, 11, 4))
+                pygame.draw.ellipse(screen, (80, 80, 80), (right_leg_x + 2, right_leg_y + 36 + right_leg_offset - shoe_bounce, 11, 4))
+                
+                # Enhanced arm pumping with realistic swing
+                arm_cycle = cutscene_timer * 0.6
+                left_arm_swing = int(15 * math.sin(arm_cycle))
+                right_arm_swing = int(15 * math.sin(arm_cycle + math.pi))
+                
+                # Left arm with shoulder to hand
+                left_arm_x = ahaan_x - 15 + int(5 * math.cos(arm_cycle))
+                left_arm_y = ahaan_y + 55 + left_arm_swing
+                pygame.draw.rect(screen, SKIN, (left_arm_x, left_arm_y, 15, 25))
+                pygame.draw.ellipse(screen, SKIN, (left_arm_x + 12, left_arm_y + 20, 8, 8))  # Fist
+                
+                # Right arm with shoulder to hand
+                right_arm_x = ahaan_x + 35 + int(5 * math.cos(arm_cycle + math.pi))
+                right_arm_y = ahaan_y + 55 + right_arm_swing
+                pygame.draw.rect(screen, SKIN, (right_arm_x, right_arm_y, 15, 25))
+                pygame.draw.ellipse(screen, SKIN, (right_arm_x - 3, right_arm_y + 20, 8, 8))  # Fist
+                
+                # Dynamic speed lines with varying intensity
+                for i in range(8):
+                    line_intensity = 255 - i * 30
+                    line_x = ahaan_x - 40 - i * 20
+                    line_length = 25 + i * 3
+                    line_thickness = max(1, 4 - i//2)
                     
-                    if color == BLACK:  # Screen
-                        pygame.draw.rect(screen, color, (part_x, part_y, 30, 20))
-                        pygame.draw.rect(screen, (100, 100, 100), (part_x + 2, part_y + 2, 26, 16))
-                    else:  # Controllers
-                        pygame.draw.rect(screen, color, (part_x, part_y, 15, 25))
-                        pygame.draw.circle(screen, BLACK, (part_x + 7, part_y + 10), 3)
+                    # Multiple speed line layers
+                    for j in range(3):
+                        speed_line_y = ahaan_y + 40 + j * 15 + int(5 * math.sin(cutscene_timer * 0.2 + i + j))
+                        pygame.draw.line(screen, (line_intensity, line_intensity, line_intensity), 
+                                       (line_x, speed_line_y), (line_x + line_length, speed_line_y + 5), line_thickness)
+                
+                # Enhanced floating Nintendo Switch parts with particle effects
+                for i, (color, offset_x, offset_y) in enumerate([(BLUE, -80, -30), (BLACK, 0, -50), (RED, 80, -20)]):
+                    part_x = ahaan_x + 250 + offset_x + int(25 * math.sin(cutscene_timer * 0.12 + i))
+                    part_y = 160 + offset_y + int(20 * math.cos(cutscene_timer * 0.08 + i))
+                    
+                    # Magical glow around parts
+                    for glow_radius in range(20, 5, -3):
+                        glow_alpha = max(0, 100 - (20 - glow_radius) * 8)
+                        # Use lighter colors instead of alpha
+                        if color != BLACK:
+                            glow_color = (min(255, color[0] + glow_alpha//6), 
+                                        min(255, color[1] + glow_alpha//6), 
+                                        min(255, color[2] + glow_alpha//6))
+                        else:
+                            glow_color = (100 + glow_alpha//6, 100 + glow_alpha//6, 255)
+                        pygame.draw.circle(screen, glow_color, (part_x + 15, part_y + 12), glow_radius, 1)
+                    
+                    # Sparkling particles around each part
+                    for spark in range(6):
+                        spark_angle = (cutscene_timer * 0.1 + spark + i) * (2 * math.pi / 6)
+                        spark_distance = 30 + int(10 * math.sin(cutscene_timer * 0.15 + spark))
+                        spark_x = part_x + 15 + int(spark_distance * math.cos(spark_angle))
+                        spark_y = part_y + 12 + int(spark_distance * math.sin(spark_angle))
+                        spark_size = 2 + int(2 * math.sin(cutscene_timer * 0.2 + spark))
+                        pygame.draw.circle(screen, YELLOW, (spark_x, spark_y), spark_size)
+                        pygame.draw.circle(screen, WHITE, (spark_x - 1, spark_y - 1), max(1, spark_size - 1))
+                    
+                    if color == BLACK:  # Enhanced Screen piece
+                        pygame.draw.rect(screen, color, (part_x, part_y, 35, 25))
+                        pygame.draw.rect(screen, (60, 60, 60), (part_x + 2, part_y + 2, 31, 21))  # Bezel
+                        pygame.draw.rect(screen, (100, 150, 200), (part_x + 4, part_y + 4, 27, 17))  # Screen
+                        # Screen glint
+                        pygame.draw.rect(screen, WHITE, (part_x + 6, part_y + 6, 8, 3))
+                        # Nintendo logo hint
+                        pygame.draw.circle(screen, RED, (part_x + 17, part_y + 12), 3)
+                        
+                    else:  # Enhanced Controller pieces
+                        pygame.draw.rect(screen, color, (part_x, part_y, 18, 30))
+                        pygame.draw.rect(screen, (255, 255, 255) if color == BLUE else (255, 200, 200), 
+                                       (part_x + 2, part_y + 2, 14, 26))  # Controller highlight
+                        pygame.draw.circle(screen, (50, 50, 50), (part_x + 9, part_y + 12), 4)  # Analog stick
+                        pygame.draw.circle(screen, (100, 100, 100), (part_x + 9, part_y + 12), 3)  # Stick top
+                        
+                        if color == BLUE:  # Left controller details
+                            pygame.draw.rect(screen, (80, 120, 255), (part_x + 4, part_y + 20, 6, 2))  # D-pad horizontal
+                            pygame.draw.rect(screen, (80, 120, 255), (part_x + 6, part_y + 18, 2, 6))  # D-pad vertical
+                        else:  # Right controller details
+                            pygame.draw.circle(screen, YELLOW, (part_x + 5, part_y + 18), 1)   # Y
+                            pygame.draw.circle(screen, GREEN, (part_x + 13, part_y + 22), 1)   # A
+                            pygame.draw.circle(screen, RED, (part_x + 13, part_y + 18), 1)     # X
+                            pygame.draw.circle(screen, BLUE, (part_x + 9, part_y + 22), 1)    # B
+                
+                # Trail of dust kicked up by running
+                for dust in range(12):
+                    dust_x = ahaan_x - 20 - dust * 15 + int(5 * random.random())
+                    dust_y = ground_y + 5 + int(8 * math.sin(cutscene_timer * 0.3 + dust))
+                    dust_size = max(1, 4 - dust//3)
+                    dust_color = (150 + dust * 5, 130 + dust * 4, 100 + dust * 3)
+                    pygame.draw.circle(screen, dust_color, (dust_x, dust_y), dust_size)
                 
                 text1 = pygame.font.Font(None, 36).render("Ahaan must collect all three pieces!", True, WHITE)
                 text2 = pygame.font.Font(None, 32).render("Defeat mom bosses to get them back!", True, YELLOW)
@@ -2203,96 +2860,613 @@ def main():
 
         # --- Nintendo Switch Cutscenes ---
         if state == "CUTSCENE_LEFT_CONTROLLER":
-            screen.fill(BLACK)
+            cutscene_timer += 1
             
-            # Draw cutscene for getting left controller
-            title = pygame.font.Font(None, 64).render("You got the Left Controller!", True, BLUE)
-            story1 = pygame.font.Font(None, 36).render("Ahaan defeats Mom and grabs the left Joy-Con!", True, WHITE)
-            story2 = pygame.font.Font(None, 36).render("'One piece down, two to go!' he says.", True, WHITE)
-            story3 = pygame.font.Font(None, 32).render("Press SPACE to continue the chase!", True, YELLOW)
+            # Dynamic background with boss defeat atmosphere
+            screen.fill((10, 10, 30))  # Dark blue background
             
-            # Draw Nintendo Switch left controller
-            pygame.draw.rect(screen, BLUE, (350, 200, 30, 100))
-            pygame.draw.circle(screen, BLACK, (365, 220), 8)
-            pygame.draw.rect(screen, (100, 100, 100), (360, 250, 10, 20))
+            # Floating victory particles
+            for i in range(20):
+                particle_x = (i * 47 + cutscene_timer * 2) % WIDTH
+                particle_y = 50 + int(30 * math.sin(cutscene_timer * 0.03 + i))
+                particle_color = (100 + i * 5, 150 + i * 3, 255)
+                pygame.draw.circle(screen, particle_color, (particle_x, particle_y), 2)
             
-            screen.blit(title, ((WIDTH-title.get_width())//2, HEIGHT//2-100))
-            screen.blit(story1, ((WIDTH-story1.get_width())//2, HEIGHT//2-50))
-            screen.blit(story2, ((WIDTH-story2.get_width())//2, HEIGHT//2-10))
-            screen.blit(story3, ((WIDTH-story3.get_width())//2, HEIGHT//2+50))
+            # Title with dramatic entrance
+            title_progress = min(cutscene_timer / 60.0, 1.0)
+            title_scale = int(64 * title_progress)
+            if title_scale > 0:
+                title = pygame.font.Font(None, title_scale).render("FIRST PART RETRIEVED!", True, BLUE)
+                # Glowing effect
+                for glow in range(3):
+                    glow_surface = pygame.font.Font(None, title_scale + glow * 2).render("FIRST PART RETRIEVED!", True, (50, 50, 150))
+                    screen.blit(glow_surface, ((WIDTH-glow_surface.get_width())//2 - glow, HEIGHT//2-150 - glow))
+                screen.blit(title, ((WIDTH-title.get_width())//2, HEIGHT//2-150))
+            
+            # Ahaan celebrating with enhanced detail
+            if cutscene_timer > 30:
+                ahaan_x, ahaan_y = WIDTH//2 - 100, HEIGHT//2 - 50
+                
+                # Victory pose with raised fist
+                # Head with excited expression
+                pygame.draw.ellipse(screen, SKIN, (ahaan_x, ahaan_y, 40, 50))
+                pygame.draw.ellipse(screen, (240, 200, 160), (ahaan_x + 2, ahaan_y + 2, 36, 46))
+                
+                # Hair with wind effect from victory
+                hair_flow = int(5 * math.sin(cutscene_timer * 0.2))
+                pygame.draw.ellipse(screen, BROWN, (ahaan_x - 5 + hair_flow, ahaan_y - 5, 50, 25))
+                
+                # Excited eyes
+                pygame.draw.ellipse(screen, WHITE, (ahaan_x + 8, ahaan_y + 15, 8, 10))
+                pygame.draw.ellipse(screen, WHITE, (ahaan_x + 24, ahaan_y + 15, 8, 10))
+                pygame.draw.circle(screen, BLACK, (ahaan_x + 11, ahaan_y + 19), 3)
+                pygame.draw.circle(screen, BLACK, (ahaan_x + 27, ahaan_y + 19), 3)
+                pygame.draw.circle(screen, WHITE, (ahaan_x + 12, ahaan_y + 18), 1)  # Eye shine
+                pygame.draw.circle(screen, WHITE, (ahaan_x + 28, ahaan_y + 18), 1)
+                
+                # Big victorious smile
+                pygame.draw.arc(screen, BLACK, (ahaan_x + 10, ahaan_y + 28, 20, 15), 0, math.pi, 3)
+                
+                # Body in victory pose
+                pygame.draw.rect(screen, BLUE, (ahaan_x - 10, ahaan_y + 50, 60, 70))
+                
+                # Raised fist (left arm up in celebration)
+                pygame.draw.rect(screen, SKIN, (ahaan_x - 25, ahaan_y + 40, 20, 40))
+                pygame.draw.ellipse(screen, SKIN, (ahaan_x - 20, ahaan_y + 30, 10, 12))  # Raised fist
+                
+                # Right arm pointing to controller
+                pygame.draw.rect(screen, SKIN, (ahaan_x + 55, ahaan_y + 60, 25, 15))
+                
+                # Legs in confident stance
+                pygame.draw.rect(screen, BLUE, (ahaan_x + 5, ahaan_y + 110, 15, 40))
+                pygame.draw.rect(screen, BLUE, (ahaan_x + 25, ahaan_y + 110, 15, 40))
+                
+                # Victory sparkles around Ahaan
+                for spark in range(8):
+                    spark_angle = cutscene_timer * 0.1 + spark * (2 * math.pi / 8)
+                    spark_x = ahaan_x + 20 + int(40 * math.cos(spark_angle))
+                    spark_y = ahaan_y + 75 + int(30 * math.sin(spark_angle))
+                    spark_size = 2 + int(2 * math.sin(cutscene_timer * 0.3 + spark))
+                    pygame.draw.circle(screen, YELLOW, (spark_x, spark_y), spark_size)
+                    pygame.draw.circle(screen, WHITE, (spark_x - 1, spark_y - 1), max(1, spark_size - 1))
+            
+            # Left controller with dramatic entrance and glow
+            if cutscene_timer > 60:
+                controller_x = WIDTH//2 + 50
+                controller_y = HEIGHT//2 - 20
+                
+                # Controller entrance animation
+                entrance_progress = min((cutscene_timer - 60) / 60.0, 1.0)
+                final_x = controller_x
+                controller_x = int(WIDTH + (final_x - WIDTH) * entrance_progress)
+                
+                # Magical glow around controller
+                glow_intensity = int(100 + 50 * math.sin(cutscene_timer * 0.15))
+                for glow_radius in range(50, 20, -5):
+                    glow_alpha = max(0, glow_intensity - (50 - glow_radius) * 4)
+                    glow_color = (0, 0, 255, glow_alpha // 4)
+                    pygame.draw.circle(screen, (50, 50, 255), (controller_x + 15, controller_y + 50), glow_radius, 2)
+                
+                # Enhanced left controller
+                pygame.draw.rect(screen, BLUE, (controller_x, controller_y, 30, 100))
+                pygame.draw.rect(screen, (100, 150, 255), (controller_x + 2, controller_y + 2, 26, 96))  # Highlight
+                
+                # Analog stick with detailed design
+                pygame.draw.circle(screen, (50, 100, 200), (controller_x + 15, controller_y + 30), 8)
+                pygame.draw.circle(screen, (80, 130, 255), (controller_x + 15, controller_y + 30), 6)
+                pygame.draw.circle(screen, (200, 220, 255), (controller_x + 15, controller_y + 30), 3)
+                
+                # D-pad with proper Nintendo style
+                pygame.draw.rect(screen, (80, 120, 255), (controller_x + 8, controller_y + 60, 14, 4))  # Horizontal
+                pygame.draw.rect(screen, (80, 120, 255), (controller_x + 13, controller_y + 55, 4, 14))  # Vertical
+                pygame.draw.circle(screen, (100, 140, 255), (controller_x + 15, controller_y + 62), 2)  # Center
+                
+                # Capture buttons
+                pygame.draw.rect(screen, (150, 150, 150), (controller_x + 5, controller_y + 80, 6, 3))
+                pygame.draw.rect(screen, (150, 150, 150), (controller_x + 5, controller_y + 90, 6, 3))
+                
+                # Energy particles floating around controller
+                for particle in range(12):
+                    particle_angle = cutscene_timer * 0.08 + particle * (2 * math.pi / 12)
+                    particle_radius = 35 + int(10 * math.sin(cutscene_timer * 0.1 + particle))
+                    particle_x = controller_x + 15 + int(particle_radius * math.cos(particle_angle))
+                    particle_y = controller_y + 50 + int(particle_radius * math.sin(particle_angle))
+                    particle_size = 1 + int(2 * math.sin(cutscene_timer * 0.2 + particle))
+                    pygame.draw.circle(screen, (100, 200, 255), (particle_x, particle_y), particle_size)
+            
+            # Story text with typewriter effect
+            if cutscene_timer > 90:
+                text_progress = min((cutscene_timer - 90) / 3.0, 1.0)
+                
+                story_text = "Ahaan defeats the first Mom boss and retrieves the Left Joy-Con!"
+                visible_chars = int(len(story_text) * text_progress)
+                visible_text = story_text[:visible_chars]
+                
+                story1 = pygame.font.Font(None, 32).render(visible_text, True, WHITE)
+                screen.blit(story1, ((WIDTH-story1.get_width())//2, HEIGHT//2+80))
+            
+            if cutscene_timer > 180:
+                story2_text = "'One piece down, two to go!' Ahaan shouts with determination!"
+                text_progress2 = min((cutscene_timer - 180) / 3.0, 1.0)
+                visible_chars2 = int(len(story2_text) * text_progress2)
+                visible_text2 = story2_text[:visible_chars2]
+                
+                story2 = pygame.font.Font(None, 28).render(visible_text2, True, YELLOW)
+                screen.blit(story2, ((WIDTH-story2.get_width())//2, HEIGHT//2+110))
+            
+            # Controls
+            if cutscene_timer > 240:
+                controls = pygame.font.Font(None, 32).render("Press SPACE to continue the adventure!", True, (150, 255, 150))
+                # Pulsing effect
+                alpha_pulse = int(200 + 55 * math.sin(cutscene_timer * 0.2))
+                screen.blit(controls, ((WIDTH-controls.get_width())//2, HEIGHT//2+150))
             
             pygame.display.flip()
-            if keys[pygame.K_SPACE]:
+            if keys[pygame.K_SPACE] and cutscene_timer > 240:
+                cutscene_timer = 0  # Reset for next cutscene
                 state = "COMPLETE"
             clock.tick(FPS)
             continue
             
         if state == "CUTSCENE_RIGHT_CONTROLLER":
-            screen.fill(BLACK)
+            cutscene_timer += 1
             
-            # Draw cutscene for getting right controller  
-            title = pygame.font.Font(None, 64).render("You got the Right Controller!", True, RED)
-            story1 = pygame.font.Font(None, 36).render("Ahaan defeats Mom again and grabs the right Joy-Con!", True, WHITE)
-            story2 = pygame.font.Font(None, 36).render("'Just the screen left!' he exclaims.", True, WHITE)
-            story3 = pygame.font.Font(None, 32).render("Press SPACE to continue the final chase!", True, YELLOW)
+            # Dynamic background with escalating intensity
+            screen.fill((30, 10, 10))  # Dark red background
             
-            # Draw Nintendo Switch right controller
-            pygame.draw.rect(screen, RED, (420, 200, 30, 100))
-            pygame.draw.circle(screen, BLACK, (435, 220), 8)
-            pygame.draw.rect(screen, (100, 100, 100), (430, 250, 10, 20))
+            # Intense victory particles with red theme
+            for i in range(25):
+                particle_x = (i * 31 + cutscene_timer * 3) % WIDTH
+                particle_y = 40 + int(40 * math.sin(cutscene_timer * 0.04 + i))
+                particle_color = (255, 100 + i * 3, 100 + i * 2)
+                particle_size = 1 + int(2 * math.sin(cutscene_timer * 0.1 + i))
+                pygame.draw.circle(screen, particle_color, (particle_x, particle_y), particle_size)
             
-            screen.blit(title, ((WIDTH-title.get_width())//2, HEIGHT//2-100))
-            screen.blit(story1, ((WIDTH-story1.get_width())//2, HEIGHT//2-50))
-            screen.blit(story2, ((WIDTH-story2.get_width())//2, HEIGHT//2-10))
-            screen.blit(story3, ((WIDTH-story3.get_width())//2, HEIGHT//2+50))
+            # Title with explosive entrance
+            title_progress = min(cutscene_timer / 45.0, 1.0)
+            title_scale = int(72 * title_progress)
+            if title_scale > 0:
+                title = pygame.font.Font(None, title_scale).render("SECOND PART SECURED!", True, RED)
+                # Multi-layered glow for intensity
+                for glow in range(4):
+                    glow_surface = pygame.font.Font(None, title_scale + glow * 3).render("SECOND PART SECURED!", True, (150 - glow * 20, 50, 50))
+                    screen.blit(glow_surface, ((WIDTH-glow_surface.get_width())//2 - glow, HEIGHT//2-160 - glow))
+                screen.blit(title, ((WIDTH-title.get_width())//2, HEIGHT//2-160))
+            
+            # Enhanced Ahaan with more confident pose
+            if cutscene_timer > 25:
+                ahaan_x, ahaan_y = WIDTH//2 - 120, HEIGHT//2 - 60
+                
+                # More heroic stance
+                # Head with determined expression
+                pygame.draw.ellipse(screen, SKIN, (ahaan_x, ahaan_y, 45, 55))
+                pygame.draw.ellipse(screen, (240, 200, 160), (ahaan_x + 3, ahaan_y + 3, 39, 49))
+                
+                # Hair flowing with increased confidence
+                hair_flow = int(8 * math.sin(cutscene_timer * 0.15))
+                pygame.draw.ellipse(screen, BROWN, (ahaan_x - 8 + hair_flow, ahaan_y - 8, 60, 30))
+                for tuft in range(3):
+                    tuft_x = ahaan_x + 10 + tuft * 15 + int(3 * math.sin(cutscene_timer * 0.2 + tuft))
+                    pygame.draw.circle(screen, (120, 80, 40), (tuft_x, ahaan_y - 2), 6)
+                
+                # Focused, determined eyes
+                pygame.draw.ellipse(screen, WHITE, (ahaan_x + 10, ahaan_y + 18, 10, 12))
+                pygame.draw.ellipse(screen, WHITE, (ahaan_x + 28, ahaan_y + 18, 10, 12))
+                pygame.draw.circle(screen, BLACK, (ahaan_x + 14, ahaan_y + 23), 4)
+                pygame.draw.circle(screen, BLACK, (ahaan_x + 32, ahaan_y + 23), 4)
+                pygame.draw.circle(screen, WHITE, (ahaan_x + 15, ahaan_y + 22), 1.5)
+                pygame.draw.circle(screen, WHITE, (ahaan_x + 33, ahaan_y + 22), 1.5)
+                
+                # Confident smile
+                pygame.draw.arc(screen, BLACK, (ahaan_x + 12, ahaan_y + 32, 22, 18), 0, math.pi, 4)
+                
+                # Body in powerful stance
+                pygame.draw.rect(screen, BLUE, (ahaan_x - 15, ahaan_y + 55, 75, 80))
+                pygame.draw.rect(screen, (100, 150, 255), (ahaan_x - 13, ahaan_y + 57, 71, 76))
+                
+                # Both arms in victory pose
+                # Left arm raised in triumph
+                pygame.draw.rect(screen, SKIN, (ahaan_x - 30, ahaan_y + 50, 25, 45))
+                pygame.draw.ellipse(screen, SKIN, (ahaan_x - 25, ahaan_y + 40, 12, 15))  # Raised fist
+                
+                # Right arm also raised
+                pygame.draw.rect(screen, SKIN, (ahaan_x + 75, ahaan_y + 50, 25, 45))
+                pygame.draw.ellipse(screen, SKIN, (ahaan_x + 80, ahaan_y + 40, 12, 15))  # Other raised fist
+                
+                # Strong stance legs
+                pygame.draw.rect(screen, BLUE, (ahaan_x + 8, ahaan_y + 125, 18, 45))
+                pygame.draw.rect(screen, BLUE, (ahaan_x + 30, ahaan_y + 125, 18, 45))
+                
+                # Enhanced victory aura
+                aura_radius = 90 + int(25 * math.sin(cutscene_timer * 0.12))
+                for ring in range(3):
+                    ring_radius = aura_radius - ring * 15
+                    ring_alpha = 255 - ring * 60
+                    pygame.draw.circle(screen, (255, 100, 100), (ahaan_x + 22, ahaan_y + 90), ring_radius, 3)
+                
+                # Power sparkles with red theme
+                for spark in range(12):
+                    spark_angle = cutscene_timer * 0.15 + spark * (2 * math.pi / 12)
+                    spark_distance = 50 + int(20 * math.sin(cutscene_timer * 0.1 + spark))
+                    spark_x = ahaan_x + 22 + int(spark_distance * math.cos(spark_angle))
+                    spark_y = ahaan_y + 90 + int(spark_distance * math.sin(spark_angle))
+                    spark_size = 2 + int(3 * math.sin(cutscene_timer * 0.25 + spark))
+                    pygame.draw.circle(screen, YELLOW, (spark_x, spark_y), spark_size)
+                    pygame.draw.circle(screen, WHITE, (spark_x - 1, spark_y - 1), max(1, spark_size - 1))
+                    pygame.draw.circle(screen, RED, (spark_x, spark_y), max(1, spark_size - 2))
+            
+            # Right controller with dramatic red entrance
+            if cutscene_timer > 50:
+                controller_x = WIDTH//2 + 80
+                controller_y = HEIGHT//2 - 30
+                
+                # Controller entrance with rotation
+                entrance_progress = min((cutscene_timer - 50) / 45.0, 1.0)
+                final_x = controller_x
+                controller_x = int(WIDTH + 100 + (final_x - WIDTH - 100) * entrance_progress)
+                rotation_angle = (1 - entrance_progress) * math.pi * 2
+                
+                # Intense red glow
+                glow_intensity = int(120 + 60 * math.sin(cutscene_timer * 0.18))
+                for glow_radius in range(60, 25, -6):
+                    glow_color = (255, 50, 50, max(0, glow_intensity - (60 - glow_radius) * 3))
+                    pygame.draw.circle(screen, (255, 100, 100), (controller_x + 15, controller_y + 50), glow_radius, 2)
+                
+                # Enhanced right controller
+                pygame.draw.rect(screen, RED, (controller_x, controller_y, 30, 100))
+                pygame.draw.rect(screen, (255, 100, 100), (controller_x + 2, controller_y + 2, 26, 96))  # Highlight
+                
+                # Analog stick with enhanced detail
+                pygame.draw.circle(screen, (200, 50, 50), (controller_x + 15, controller_y + 30), 8)
+                pygame.draw.circle(screen, (255, 80, 80), (controller_x + 15, controller_y + 30), 6)
+                pygame.draw.circle(screen, (255, 200, 200), (controller_x + 15, controller_y + 30), 3)
+                
+                # ABXY buttons with proper Nintendo colors
+                pygame.draw.circle(screen, YELLOW, (controller_x + 8, controller_y + 55), 3)    # Y button
+                pygame.draw.circle(screen, GREEN, (controller_x + 22, controller_y + 65), 3)    # A button  
+                pygame.draw.circle(screen, BLUE, (controller_x + 22, controller_y + 45), 3)     # X button
+                pygame.draw.circle(screen, RED, (controller_x + 8, controller_y + 65), 3)       # B button
+                
+                # Button labels
+                button_font = pygame.font.Font(None, 16)
+                y_label = button_font.render("Y", True, BLACK)
+                a_label = button_font.render("A", True, BLACK)
+                x_label = button_font.render("X", True, BLACK)
+                b_label = button_font.render("B", True, BLACK)
+                screen.blit(y_label, (controller_x + 6, controller_y + 52))
+                screen.blit(a_label, (controller_x + 20, controller_y + 62))
+                screen.blit(x_label, (controller_x + 20, controller_y + 42))
+                screen.blit(b_label, (controller_x + 6, controller_y + 62))
+                
+                # Plus button and home button
+                pygame.draw.rect(screen, (150, 150, 150), (controller_x + 18, controller_y + 80, 6, 2))
+                pygame.draw.rect(screen, (150, 150, 150), (controller_x + 20, controller_y + 78, 2, 6))
+                pygame.draw.circle(screen, (100, 100, 100), (controller_x + 15, controller_y + 90), 4)
+                
+                # Energy vortex around controller
+                for particle in range(15):
+                    particle_angle = cutscene_timer * 0.12 + particle * (2 * math.pi / 15)
+                    particle_radius = 40 + int(15 * math.sin(cutscene_timer * 0.08 + particle))
+                    particle_x = controller_x + 15 + int(particle_radius * math.cos(particle_angle))
+                    particle_y = controller_y + 50 + int(particle_radius * math.sin(particle_angle))
+                    particle_size = 1 + int(3 * math.sin(cutscene_timer * 0.22 + particle))
+                    pygame.draw.circle(screen, (255, 150, 150), (particle_x, particle_y), particle_size)
+                    pygame.draw.circle(screen, WHITE, (particle_x, particle_y), max(1, particle_size - 1))
+            
+            # Story text with enhanced typewriter effect
+            if cutscene_timer > 80:
+                text_progress = min((cutscene_timer - 80) / 2.5, 1.0)
+                
+                story_text = "Ahaan conquers the second Mom boss and claims the Right Joy-Con!"
+                visible_chars = int(len(story_text) * text_progress)
+                visible_text = story_text[:visible_chars]
+                
+                story1 = pygame.font.Font(None, 30).render(visible_text, True, WHITE)
+                screen.blit(story1, ((WIDTH-story1.get_width())//2, HEIGHT//2+90))
+            
+            if cutscene_timer > 160:
+                story2_text = "'Just the screen left!' he declares with unwavering confidence!"
+                text_progress2 = min((cutscene_timer - 160) / 2.5, 1.0)
+                visible_chars2 = int(len(story2_text) * text_progress2)
+                visible_text2 = story2_text[:visible_chars2]
+                
+                story2 = pygame.font.Font(None, 26).render(visible_text2, True, YELLOW)
+                screen.blit(story2, ((WIDTH-story2.get_width())//2, HEIGHT//2+120))
+            
+            # Controls with pulsing effect
+            if cutscene_timer > 220:
+                pulse_intensity = int(200 + 55 * math.sin(cutscene_timer * 0.25))
+                controls = pygame.font.Font(None, 32).render("Press SPACE for the final showdown!", True, (255, pulse_intensity, pulse_intensity))
+                screen.blit(controls, ((WIDTH-controls.get_width())//2, HEIGHT//2+160))
             
             pygame.display.flip()
-            if keys[pygame.K_SPACE]:
+            if keys[pygame.K_SPACE] and cutscene_timer > 220:
+                cutscene_timer = 0  # Reset for next cutscene
                 state = "COMPLETE"
             clock.tick(FPS)
             continue
             
         if state == "CUTSCENE_SCREEN":
-            screen.fill(BLACK)
+            cutscene_timer += 1
             
-            # Check if all parts are collected
+            # Check if all parts are collected for different scenarios
             if switch_parts_count >= 3:
-                # Final victory cutscene
-                title = pygame.font.Font(None, 64).render("Nintendo Switch Complete!", True, GREEN)
-                story1 = pygame.font.Font(None, 36).render("Ahaan defeats Mom one last time and gets the screen!", True, WHITE)
-                story2 = pygame.font.Font(None, 36).render("He quickly assembles his Nintendo Switch and runs away!", True, WHITE)
-                story3 = pygame.font.Font(None, 32).render("Press SPACE to see the ending!", True, YELLOW)
+                # FINAL VICTORY CUTSCENE - Ultimate triumph!
+                screen.fill((10, 30, 10))  # Dark green background for victory
                 
-                # Draw complete Nintendo Switch
-                pygame.draw.rect(screen, BLUE, (350, 200, 30, 100))    # Left controller
-                pygame.draw.rect(screen, BLACK, (380, 210, 80, 80))    # Screen
-                pygame.draw.rect(screen, (100, 100, 100), (385, 215, 70, 70))  # Screen interior
-                pygame.draw.rect(screen, RED, (460, 200, 30, 100))     # Right controller
+                # Epic celebration particles
+                for i in range(30):
+                    particle_x = (i * 23 + cutscene_timer * 4) % WIDTH
+                    particle_y = 30 + int(50 * math.sin(cutscene_timer * 0.05 + i))
+                    particle_color = (100 + i * 3, 255, 100 + i * 2)
+                    particle_size = 1 + int(3 * math.sin(cutscene_timer * 0.12 + i))
+                    pygame.draw.circle(screen, particle_color, (particle_x, particle_y), particle_size)
                 
-                # Add joy-con details
-                pygame.draw.circle(screen, BLACK, (365, 220), 6)
-                pygame.draw.circle(screen, BLACK, (475, 220), 6)
+                # Ultimate victory title with maximum impact
+                title_progress = min(cutscene_timer / 30.0, 1.0)
+                title_scale = int(96 * title_progress)
+                if title_scale > 0:
+                    title = pygame.font.Font(None, title_scale).render("NINTENDO SWITCH COMPLETE!", True, GREEN)
+                    # Epic multi-layer glow
+                    for glow in range(6):
+                        glow_surface = pygame.font.Font(None, title_scale + glow * 4).render("NINTENDO SWITCH COMPLETE!", True, (50 + glow * 10, 255 - glow * 20, 50 + glow * 10))
+                        screen.blit(glow_surface, ((WIDTH-glow_surface.get_width())//2 - glow * 2, HEIGHT//2-200 - glow * 2))
+                    screen.blit(title, ((WIDTH-title.get_width())//2, HEIGHT//2-200))
+                
+                # Ahaan in ultimate victory pose
+                if cutscene_timer > 20:
+                    ahaan_x, ahaan_y = WIDTH//2 - 150, HEIGHT//2 - 80
+                    
+                    # Triumphant hero stance
+                    # Head with pure joy expression
+                    pygame.draw.ellipse(screen, SKIN, (ahaan_x, ahaan_y, 50, 60))
+                    pygame.draw.ellipse(screen, (240, 200, 160), (ahaan_x + 3, ahaan_y + 3, 44, 54))
+                    
+                    # Hair flowing with victory wind
+                    hair_flow = int(12 * math.sin(cutscene_timer * 0.1))
+                    pygame.draw.ellipse(screen, BROWN, (ahaan_x - 10 + hair_flow, ahaan_y - 10, 70, 35))
+                    for tuft in range(4):
+                        tuft_x = ahaan_x + 8 + tuft * 12 + int(5 * math.sin(cutscene_timer * 0.15 + tuft))
+                        pygame.draw.circle(screen, (120, 80, 40), (tuft_x, ahaan_y - 5), 8)
+                    
+                    # Eyes radiating pure happiness
+                    pygame.draw.ellipse(screen, WHITE, (ahaan_x + 12, ahaan_y + 20, 12, 14))
+                    pygame.draw.ellipse(screen, WHITE, (ahaan_x + 30, ahaan_y + 20, 12, 14))
+                    pygame.draw.circle(screen, BLACK, (ahaan_x + 17, ahaan_y + 26), 5)
+                    pygame.draw.circle(screen, BLACK, (ahaan_x + 35, ahaan_y + 26), 5)
+                    # Eyes sparkling with joy
+                    pygame.draw.circle(screen, WHITE, (ahaan_x + 18, ahaan_y + 24), 2)
+                    pygame.draw.circle(screen, WHITE, (ahaan_x + 36, ahaan_y + 24), 2)
+                    pygame.draw.circle(screen, YELLOW, (ahaan_x + 19, ahaan_y + 25), 1)
+                    pygame.draw.circle(screen, YELLOW, (ahaan_x + 37, ahaan_y + 25), 1)
+                    
+                    # Biggest smile ever
+                    pygame.draw.arc(screen, BLACK, (ahaan_x + 10, ahaan_y + 35, 30, 20), 0, math.pi, 5)
+                    pygame.draw.arc(screen, (200, 100, 100), (ahaan_x + 12, ahaan_y + 37, 26, 16), 0, math.pi, 3)
+                    
+                    # Body in ultimate victory pose
+                    pygame.draw.rect(screen, BLUE, (ahaan_x - 20, ahaan_y + 60, 90, 90))
+                    pygame.draw.rect(screen, (100, 150, 255), (ahaan_x - 18, ahaan_y + 62, 86, 86))
+                    
+                    # Both arms raised high in victory
+                    pygame.draw.rect(screen, SKIN, (ahaan_x - 40, ahaan_y + 40, 30, 50))  # Left arm up
+                    pygame.draw.rect(screen, SKIN, (ahaan_x + 90, ahaan_y + 40, 30, 50))  # Right arm up
+                    pygame.draw.ellipse(screen, SKIN, (ahaan_x - 35, ahaan_y + 25, 15, 18))  # Left fist
+                    pygame.draw.ellipse(screen, SKIN, (ahaan_x + 95, ahaan_y + 25, 15, 18))  # Right fist
+                    
+                    # Strong victory stance
+                    pygame.draw.rect(screen, BLUE, (ahaan_x + 10, ahaan_y + 140, 20, 50))
+                    pygame.draw.rect(screen, BLUE, (ahaan_x + 35, ahaan_y + 140, 20, 50))
+                    
+                    # Ultimate victory aura
+                    mega_aura_radius = 120 + int(40 * math.sin(cutscene_timer * 0.08))
+                    for ring in range(5):
+                        ring_radius = mega_aura_radius - ring * 20
+                        ring_color = (100 + ring * 30, 255, 100 + ring * 30)
+                        pygame.draw.circle(screen, ring_color, (ahaan_x + 25, ahaan_y + 100), ring_radius, 4)
+                    
+                    # Epic victory sparkles
+                    for spark in range(20):
+                        spark_angle = cutscene_timer * 0.2 + spark * (2 * math.pi / 20)
+                        spark_distance = 60 + int(30 * math.sin(cutscene_timer * 0.05 + spark))
+                        spark_x = ahaan_x + 25 + int(spark_distance * math.cos(spark_angle))
+                        spark_y = ahaan_y + 100 + int(spark_distance * math.sin(spark_angle))
+                        spark_size = 2 + int(4 * math.sin(cutscene_timer * 0.3 + spark))
+                        pygame.draw.circle(screen, YELLOW, (spark_x, spark_y), spark_size)
+                        pygame.draw.circle(screen, WHITE, (spark_x - 1, spark_y - 1), max(1, spark_size - 1))
+                        pygame.draw.circle(screen, GREEN, (spark_x, spark_y), max(1, spark_size - 2))
+                
+                # Complete Nintendo Switch with assembly animation
+                if cutscene_timer > 40:
+                    switch_x = WIDTH//2 + 100
+                    switch_y = HEIGHT//2 - 50
+                    
+                    # Assembly progress animation
+                    assembly_progress = min((cutscene_timer - 40) / 60.0, 1.0)
+                    
+                    # Screen piece (arrives first)
+                    screen_piece_x = switch_x
+                    screen_piece_y = switch_y
+                    pygame.draw.rect(screen, BLACK, (screen_piece_x, screen_piece_y, 80, 80))
+                    pygame.draw.rect(screen, (40, 40, 40), (screen_piece_x + 3, screen_piece_y + 3, 74, 74))
+                    # Screen content showing victory
+                    pygame.draw.rect(screen, (100, 255, 100), (screen_piece_x + 8, screen_piece_y + 8, 64, 64))
+                    pygame.draw.circle(screen, YELLOW, (screen_piece_x + 40, screen_piece_y + 30), 8)  # Happy face
+                    pygame.draw.circle(screen, BLACK, (screen_piece_x + 35, screen_piece_y + 25), 2)
+                    pygame.draw.circle(screen, BLACK, (screen_piece_x + 45, screen_piece_y + 25), 2)
+                    pygame.draw.arc(screen, BLACK, (screen_piece_x + 32, screen_piece_y + 32, 16, 10), 0, math.pi, 2)
+                    
+                    # Left controller slides in from left
+                    left_controller_target_x = switch_x - 20
+                    left_controller_x = int(switch_x - 200 + (left_controller_target_x - (switch_x - 200)) * assembly_progress)
+                    pygame.draw.rect(screen, BLUE, (left_controller_x, switch_y + 5, 25, 70))
+                    pygame.draw.rect(screen, (100, 150, 255), (left_controller_x + 2, switch_y + 7, 21, 66))
+                    pygame.draw.circle(screen, (50, 100, 200), (left_controller_x + 12, switch_y + 25), 6)
+                    
+                    # Right controller slides in from right
+                    right_controller_target_x = switch_x + 75
+                    right_controller_x = int(switch_x + 200 + (right_controller_target_x - (switch_x + 200)) * assembly_progress)
+                    pygame.draw.rect(screen, RED, (right_controller_x, switch_y + 5, 25, 70))
+                    pygame.draw.rect(screen, (255, 100, 100), (right_controller_x + 2, switch_y + 7, 21, 66))
+                    pygame.draw.circle(screen, (200, 50, 50), (right_controller_x + 12, switch_y + 25), 6)
+                    
+                    # Assembly completion effects
+                    if assembly_progress >= 1.0:
+                        # Magical completion flash
+                        flash_intensity = int(100 * math.sin(cutscene_timer * 0.4))
+                        pygame.draw.circle(screen, (255, 255, 255), (switch_x + 40, switch_y + 40), 150, flash_intensity // 20)
+                        
+                        # Complete Nintendo Switch glow
+                        for glow_radius in range(100, 40, -10):
+                            glow_alpha = max(0, 255 - (100 - glow_radius) * 5)
+                            pygame.draw.circle(screen, (150, 255, 150), (switch_x + 40, switch_y + 40), glow_radius, 2)
+                
+                # Epic story text
+                if cutscene_timer > 70:
+                    text_progress = min((cutscene_timer - 70) / 2.0, 1.0)
+                    story_text = "Ahaan defeats the final Mom boss and claims the screen!"
+                    visible_chars = int(len(story_text) * text_progress)
+                    visible_text = story_text[:visible_chars]
+                    story1 = pygame.font.Font(None, 32).render(visible_text, True, WHITE)
+                    screen.blit(story1, ((WIDTH-story1.get_width())//2, HEIGHT//2+120))
+                
+                if cutscene_timer > 140:
+                    text_progress2 = min((cutscene_timer - 140) / 2.0, 1.0)
+                    story2_text = "He quickly assembles his Nintendo Switch - VICTORY IS HIS!"
+                    visible_chars2 = int(len(story2_text) * text_progress2)
+                    visible_text2 = story2_text[:visible_chars2]
+                    story2 = pygame.font.Font(None, 28).render(visible_text2, True, GOLDEN)
+                    screen.blit(story2, ((WIDTH-story2.get_width())//2, HEIGHT//2+150))
+                
+                if cutscene_timer > 200:
+                    pulse_intensity = int(200 + 55 * math.sin(cutscene_timer * 0.3))
+                    controls = pygame.font.Font(None, 36).render("Press SPACE to see the grand finale!", True, (pulse_intensity, 255, pulse_intensity))
+                    screen.blit(controls, ((WIDTH-controls.get_width())//2, HEIGHT//2+190))
                 
                 state_after_space = "VICTORY_CUTSCENE"
-            else:
-                title = pygame.font.Font(None, 64).render("You got the Screen!", True, GREEN)
-                story1 = pygame.font.Font(None, 36).render("Ahaan gets the final piece - the screen!", True, WHITE)
-                story2 = pygame.font.Font(None, 36).render("But something's wrong... more challenges await!", True, WHITE)
-                story3 = pygame.font.Font(None, 32).render("Press SPACE to continue!", True, YELLOW)
+                min_timer = 200
                 
-                # Draw just the screen
-                pygame.draw.rect(screen, BLACK, (360, 210, 80, 80))
-                pygame.draw.rect(screen, (100, 100, 100), (365, 215, 70, 70))
+            else:
+                # INTERMEDIATE SCREEN CUTSCENE - Getting just the screen piece
+                screen.fill((20, 10, 30))  # Dark purple background
+                
+                # Mysterious victory particles
+                for i in range(20):
+                    particle_x = (i * 41 + cutscene_timer * 2.5) % WIDTH
+                    particle_y = 40 + int(35 * math.sin(cutscene_timer * 0.04 + i))
+                    particle_color = (150 + i * 2, 255, 150 + i * 3)
+                    particle_size = 1 + int(2 * math.sin(cutscene_timer * 0.15 + i))
+                    pygame.draw.circle(screen, particle_color, (particle_x, particle_y), particle_size)
+                
+                # Title with ominous undertone
+                title_progress = min(cutscene_timer / 40.0, 1.0)
+                title_scale = int(68 * title_progress)
+                if title_scale > 0:
+                    title = pygame.font.Font(None, title_scale).render("FINAL PIECE OBTAINED!", True, GREEN)
+                    # Mysterious glow
+                    for glow in range(3):
+                        glow_surface = pygame.font.Font(None, title_scale + glow * 3).render("FINAL PIECE OBTAINED!", True, (100, 200 - glow * 30, 100))
+                        screen.blit(glow_surface, ((WIDTH-glow_surface.get_width())//2 - glow, HEIGHT//2-140 - glow))
+                    screen.blit(title, ((WIDTH-title.get_width())//2, HEIGHT//2-140))
+                
+                # Ahaan with determined but cautious expression
+                if cutscene_timer > 30:
+                    ahaan_x, ahaan_y = WIDTH//2 - 110, HEIGHT//2 - 50
+                    
+                    # Focused, determined stance
+                    pygame.draw.ellipse(screen, SKIN, (ahaan_x, ahaan_y, 42, 52))
+                    pygame.draw.ellipse(screen, (240, 200, 160), (ahaan_x + 2, ahaan_y + 2, 38, 48))
+                    
+                    # Hair with slight wind
+                    hair_flow = int(6 * math.sin(cutscene_timer * 0.12))
+                    pygame.draw.ellipse(screen, BROWN, (ahaan_x - 6 + hair_flow, ahaan_y - 6, 55, 28))
+                    
+                    # Determined but cautious eyes
+                    pygame.draw.ellipse(screen, WHITE, (ahaan_x + 9, ahaan_y + 16, 9, 11))
+                    pygame.draw.ellipse(screen, WHITE, (ahaan_x + 26, ahaan_y + 16, 9, 11))
+                    pygame.draw.circle(screen, BLACK, (ahaan_x + 13, ahaan_y + 21), 3)
+                    pygame.draw.circle(screen, BLACK, (ahaan_x + 30, ahaan_y + 21), 3)
+                    
+                    # Slight smile - victory but awareness of more challenges
+                    pygame.draw.arc(screen, BLACK, (ahaan_x + 12, ahaan_y + 30, 18, 12), 0, math.pi, 3)
+                    
+                    # Body reaching for screen
+                    pygame.draw.rect(screen, BLUE, (ahaan_x - 8, ahaan_y + 52, 58, 75))
+                    pygame.draw.rect(screen, SKIN, (ahaan_x + 45, ahaan_y + 65, 22, 30))  # Reaching arm
+                    
+                    # Legs in ready stance
+                    pygame.draw.rect(screen, BLUE, (ahaan_x + 8, ahaan_y + 120, 16, 42))
+                    pygame.draw.rect(screen, BLUE, (ahaan_x + 28, ahaan_y + 120, 16, 42))
+                    
+                    # Cautious aura - success but more to come
+                    aura_radius = 70 + int(15 * math.sin(cutscene_timer * 0.1))
+                    for ring in range(2):
+                        ring_radius = aura_radius - ring * 20
+                        pygame.draw.circle(screen, (100, 200, 100), (ahaan_x + 21, ahaan_y + 85), ring_radius, 2)
+                
+                # Nintendo Switch screen with mysterious glow
+                if cutscene_timer > 50:
+                    screen_x = WIDTH//2 + 60
+                    screen_y = HEIGHT//2 - 30
+                    
+                    # Entrance animation
+                    entrance_progress = min((cutscene_timer - 50) / 40.0, 1.0)
+                    final_x = screen_x
+                    screen_x = int(WIDTH + 50 + (final_x - WIDTH - 50) * entrance_progress)
+                    
+                    # Mysterious glow around screen
+                    glow_intensity = int(80 + 40 * math.sin(cutscene_timer * 0.16))
+                    for glow_radius in range(50, 25, -5):
+                        pygame.draw.circle(screen, (100, 255, 100), (screen_x + 40, screen_y + 40), glow_radius, 2)
+                    
+                    # Enhanced Nintendo Switch screen
+                    pygame.draw.rect(screen, BLACK, (screen_x, screen_y, 80, 80))
+                    pygame.draw.rect(screen, (40, 40, 40), (screen_x + 4, screen_y + 4, 72, 72))  # Bezel
+                    pygame.draw.rect(screen, (50, 150, 50), (screen_x + 8, screen_y + 8, 64, 64))  # Screen glow
+                    
+                    # Question mark on screen - mystery remains
+                    pygame.draw.circle(screen, YELLOW, (screen_x + 40, screen_y + 30), 8)
+                    question_font = pygame.font.Font(None, 24)
+                    question_mark = question_font.render("?", True, BLACK)
+                    screen.blit(question_mark, (screen_x + 36, screen_y + 24))
+                    
+                    # Mysterious particles around screen
+                    for particle in range(10):
+                        particle_angle = cutscene_timer * 0.1 + particle * (2 * math.pi / 10)
+                        particle_radius = 35 + int(8 * math.sin(cutscene_timer * 0.12 + particle))
+                        particle_x = screen_x + 40 + int(particle_radius * math.cos(particle_angle))
+                        particle_y = screen_y + 40 + int(particle_radius * math.sin(particle_angle))
+                        particle_size = 1 + int(2 * math.sin(cutscene_timer * 0.18 + particle))
+                        pygame.draw.circle(screen, (150, 255, 150), (particle_x, particle_y), particle_size)
+                
+                # Story with hint of mystery
+                if cutscene_timer > 80:
+                    text_progress = min((cutscene_timer - 80) / 2.5, 1.0)
+                    story_text = "Ahaan retrieves the final piece - the Nintendo Switch screen!"
+                    visible_chars = int(len(story_text) * text_progress)
+                    visible_text = story_text[:visible_chars]
+                    story1 = pygame.font.Font(None, 30).render(visible_text, True, WHITE)
+                    screen.blit(story1, ((WIDTH-story1.get_width())//2, HEIGHT//2+100))
+                
+                if cutscene_timer > 150:
+                    text_progress2 = min((cutscene_timer - 150) / 2.5, 1.0)
+                    story2_text = "But something feels different... more challenges await!"
+                    visible_chars2 = int(len(story2_text) * text_progress2)
+                    visible_text2 = story2_text[:visible_chars2]
+                    story2 = pygame.font.Font(None, 26).render(visible_text2, True, (255, 200, 100))
+                    screen.blit(story2, ((WIDTH-story2.get_width())//2, HEIGHT//2+130))
+                
+                if cutscene_timer > 200:
+                    pulse_intensity = int(150 + 105 * math.sin(cutscene_timer * 0.2))
+                    controls = pygame.font.Font(None, 32).render("Press SPACE to continue the adventure!", True, (pulse_intensity, 255, pulse_intensity))
+                    screen.blit(controls, ((WIDTH-controls.get_width())//2, HEIGHT//2+170))
                 
                 state_after_space = "COMPLETE"
-            
-            screen.blit(title, ((WIDTH-title.get_width())//2, HEIGHT//2-100))
-            screen.blit(story1, ((WIDTH-story1.get_width())//2, HEIGHT//2-50))
-            screen.blit(story2, ((WIDTH-story2.get_width())//2, HEIGHT//2-10))
-            screen.blit(story3, ((WIDTH-story3.get_width())//2, HEIGHT//2+50))
+                min_timer = 200
             
             pygame.display.flip()
-            if keys[pygame.K_SPACE]:
+            if keys[pygame.K_SPACE] and cutscene_timer > min_timer:
+                cutscene_timer = 0  # Reset for next cutscene
                 state = state_after_space
             clock.tick(FPS)
             continue
@@ -2641,7 +3815,6 @@ def main():
                             return_score = score
                             
                             # Choose secret world type based on current level
-                            import random
                             secret_world_type = ((current_level - 1) % 3) + 1
                             
                             # Create secret level
@@ -2755,6 +3928,76 @@ def main():
                 g = int(128 + 127 * math.sin(ratio * 2 + 2 + warp_timer * 0.05))
                 b = int(128 + 127 * math.sin(ratio * 2 + 4 + warp_timer * 0.05))
                 pygame.draw.line(screen, (r, g, b), (0, y), (WIDTH, y))
+        elif current_level == 5:
+            # Special badminton court background
+            # Indoor sports hall gradient (lighter colors for indoor feeling)
+            for y in range(HEIGHT):
+                ratio = y / HEIGHT
+                # Light gray to white gradient (indoor court feeling)
+                r = int(180 + ratio * 60)   # 180 to 240
+                g = int(190 + ratio * 50)   # 190 to 240
+                b = int(200 + ratio * 40)   # 200 to 240
+                pygame.draw.line(screen, (r, g, b), (0, y), (WIDTH, y))
+            
+            # Draw badminton court lines and net
+            # Court floor (light brown/beige)
+            pygame.draw.rect(screen, (210, 180, 140), (0 - camera_x, HEIGHT - 50, LEVEL_END_X + 200, 50))
+            
+            # Badminton court markings (white lines)
+            court_lines = [
+                # Outer court boundaries
+                (100 - camera_x, HEIGHT - 45, LEVEL_END_X - 100, 3),  # Bottom line
+                (100 - camera_x, HEIGHT - 200, 3, 155),              # Left line
+                ((LEVEL_END_X - 100) - camera_x, HEIGHT - 200, 3, 155),  # Right line
+                (100 - camera_x, HEIGHT - 200, LEVEL_END_X - 100, 3),    # Top line
+                
+                # Center line and service courts
+                ((LEVEL_END_X // 2 - 50) - camera_x, HEIGHT - 200, 3, 155),  # Center line
+                (200 - camera_x, HEIGHT - 120, LEVEL_END_X - 300, 3),       # Service line 1
+                (200 - camera_x, HEIGHT - 80, LEVEL_END_X - 300, 3),        # Service line 2
+            ]
+            
+            for line in court_lines:
+                if len(line) == 4:  # Make sure we have x, y, width, height
+                    pygame.draw.rect(screen, WHITE, line)
+            
+            # Badminton net in the center
+            net_x = (LEVEL_END_X // 2) - camera_x
+            net_y = HEIGHT - 200
+            net_height = 100
+            
+            # Net posts
+            pygame.draw.rect(screen, (100, 50, 20), (net_x - 5, net_y, 4, net_height))
+            pygame.draw.rect(screen, (100, 50, 20), (net_x + 101, net_y, 4, net_height))
+            
+            # Net mesh pattern
+            for i in range(0, 100, 8):
+                pygame.draw.line(screen, WHITE, (net_x + i, net_y), (net_x + i, net_y + net_height), 1)
+            for i in range(0, net_height, 6):
+                pygame.draw.line(screen, WHITE, (net_x, net_y + i), (net_x + 100, net_y + i), 1)
+            
+            # Indoor lighting (ceiling lights)
+            for light in range(3):
+                light_x = 300 + light * 400 - camera_x // 4
+                if light_x > -100 and light_x < WIDTH + 100:
+                    # Light fixtures
+                    pygame.draw.rect(screen, (220, 220, 220), (light_x, 20, 80, 15))
+                    pygame.draw.rect(screen, (255, 255, 200), (light_x + 5, 22, 70, 11))
+                    # Light rays
+                    for ray in range(5):
+                        ray_x = light_x + 15 + ray * 12
+                        pygame.draw.line(screen, (255, 255, 200), (ray_x, 35), (ray_x, 80), 1)
+            
+            # Badminton equipment on walls (posters, scoreboards)
+            # Equipment rack silhouettes
+            for rack in range(2):
+                rack_x = 50 + rack * (LEVEL_END_X - 200) - camera_x // 2
+                if rack_x > -100 and rack_x < WIDTH + 100:
+                    pygame.draw.rect(screen, (80, 60, 40), (rack_x, 150, 60, 80))
+                    # Rackets on rack
+                    for racket in range(4):
+                        racket_y = 160 + racket * 15
+                        pygame.draw.ellipse(screen, (200, 50, 50), (rack_x + 10 + racket * 12, racket_y, 8, 12))
         else:
             # Beautiful sky gradient for normal levels
             for y in range(HEIGHT):
@@ -2766,7 +4009,6 @@ def main():
                 pygame.draw.line(screen, (r, g, b), (0, y), (WIDTH, y))
             
             # Add some clouds
-            import random
             random.seed(42)  # Consistent cloud positions
             for i in range(8):
                 cloud_x = (i * 250 + random.randint(-50, 50) - camera_x // 3) % (WIDTH + 200) - 100
@@ -2855,6 +4097,12 @@ def main():
             screen.blit(level_text, (10, 50))
             secret_hint = pygame.font.Font(None, 24).render('Find warp pipes to return!', True, YELLOW)
             screen.blit(secret_hint, (10, 90))
+        elif current_level == 5:
+            # Special display for badminton level
+            level_text = font.render(f'Level 5: BADMINTON COURT!', True, RED)
+            screen.blit(level_text, (10, 50))
+            badminton_warning = pygame.font.Font(None, 24).render('⚠️ Forced Badminton Class! ⚠️', True, (255, 100, 100))
+            screen.blit(badminton_warning, (10, 85))
         else:
             level_text = font.render(f'Level: {current_level}', True, BLACK)
             screen.blit(level_text, (10, 50))
