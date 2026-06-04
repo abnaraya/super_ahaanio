@@ -2,18 +2,9 @@ import pygame
 import sys
 import math
 import random
+import time
 from game import audio
-from game.constants import (
-    WIDTH, HEIGHT, FPS, WHITE, BLACK, RED, SKIN, BLUE, BROWN, GREEN,
-    PIPE_GREEN, YELLOW, GOLDEN, FLAGPOLE,
-    PLAYER_SIZE, PLAYER_SPEED, JUMP_HEIGHT, GRAVITY, LEVEL_END_X,
-    DEFAULT_SETTINGS, DEFAULT_PROGRESS, DIFFICULTY_PRESETS,
-)
-from game.states import GameState
-from game.renderer import get_font, build_gradient_surface
-from game.objects import Particle, SecretToken
-from game.player import Player
-from game.levels import create_normal_level, create_secret_level, create_boss_level
+from game.levels import LevelFactory
 from game.persistence import (
     load_high_score,
     save_high_score,
@@ -23,10 +14,98 @@ from game.persistence import (
     load_progress,
     save_progress,
 )
+
 # Initialize Pygame
 pygame.init()
 pygame.mixer.init()
 audio.initialize_music("bgm.mp3")
+
+# Constants
+WIDTH, HEIGHT = 800, 600
+FPS = 60
+
+# Colors
+WHITE = (255,255,255)
+BLACK = (0,0,0)
+RED = (220, 55, 70)
+SKIN = (255, 225, 175)
+BLUE = (0, 122, 255)
+BROWN = (140, 100, 50)
+GREEN = (34, 177, 76)
+PIPE_GREEN = (0, 140, 51)
+YELLOW = (255, 222, 80)
+GOLDEN = (255, 215, 50)
+FLAGPOLE = (180, 180, 180)
+
+PLAYER_SIZE = 50
+PLAYER_SPEED = 5
+JUMP_HEIGHT = -22
+GRAVITY = 1
+
+LEVEL_END_X = 2000  # Extended world width for longer and more challenging levels
+
+DEFAULT_SETTINGS = {
+    "reduced_motion": False,
+    "assist_mode": False,
+    "music_volume": 0.15,
+    "controls": {
+        "left": "left",
+        "right": "right",
+        "jump": "space",
+        "pause": "escape",
+        "alt_pause": "p",
+        "pipe_down": "down",
+    },
+    "balance": {
+        "coyote_frames": 7,
+        "jump_buffer_frames": 8,
+        "short_hop_gravity_boost": 0.55,
+        "combo_window_frames": 75,
+        "difficulty_per_level": 0.05,
+        "checkpoint_bonus": 120,
+        "coin_goal_bonus": 350,
+        "coin_goal_ratio": 0.6,
+    },
+    "difficulty_preset": "Normal",
+}
+
+DEFAULT_PROGRESS = {
+    "unlocked_level": 1,
+    "best_score": 0,
+}
+
+DIFFICULTY_PRESETS = {
+    "Easy": {
+        "coyote_frames": 9,
+        "jump_buffer_frames": 10,
+        "short_hop_gravity_boost": 0.48,
+        "combo_window_frames": 95,
+        "difficulty_per_level": 0.03,
+        "checkpoint_bonus": 180,
+        "coin_goal_bonus": 420,
+        "coin_goal_ratio": 0.5,
+    },
+    "Normal": {
+        "coyote_frames": 7,
+        "jump_buffer_frames": 8,
+        "short_hop_gravity_boost": 0.55,
+        "combo_window_frames": 75,
+        "difficulty_per_level": 0.05,
+        "checkpoint_bonus": 120,
+        "coin_goal_bonus": 350,
+        "coin_goal_ratio": 0.6,
+    },
+    "Hard": {
+        "coyote_frames": 6,
+        "jump_buffer_frames": 6,
+        "short_hop_gravity_boost": 0.65,
+        "combo_window_frames": 60,
+        "difficulty_per_level": 0.08,
+        "checkpoint_bonus": 80,
+        "coin_goal_bonus": 260,
+        "coin_goal_ratio": 0.72,
+    },
+}
 
 
 def _key_from_name(name: str, fallback: int) -> int:
@@ -34,10 +113,12 @@ def _key_from_name(name: str, fallback: int) -> int:
     key = getattr(pygame, f"K_{normalized}", None)
     return key if isinstance(key, int) else fallback
 
+
 def _key_from_value(value, fallback: int) -> int:
     if isinstance(value, int):
         return value
     return _key_from_name(value, fallback)
+
 
 def resolve_controls(settings: dict) -> dict:
     controls = settings.get("controls", {})
@@ -50,8 +131,31 @@ def resolve_controls(settings: dict) -> dict:
         "pipe_down": _key_from_value(controls.get("pipe_down", "down"), pygame.K_DOWN),
     }
 
+
 def clamp(value, low, high):
     return max(low, min(high, value))
+
+
+_BACKGROUND_CACHE = {}
+
+
+def key_label(key_code: int) -> str:
+    return pygame.key.name(key_code).upper()
+
+
+def build_gradient_surface(top_color, bottom_color):
+    key = (top_color, bottom_color, WIDTH, HEIGHT)
+    if key in _BACKGROUND_CACHE:
+        return _BACKGROUND_CACHE[key]
+    surface = pygame.Surface((WIDTH, HEIGHT))
+    for y in range(HEIGHT):
+        t = y / max(1, HEIGHT - 1)
+        r = int(top_color[0] + (bottom_color[0] - top_color[0]) * t)
+        g = int(top_color[1] + (bottom_color[1] - top_color[1]) * t)
+        b = int(top_color[2] + (bottom_color[2] - top_color[2]) * t)
+        pygame.draw.line(surface, (r, g, b), (0, y), (WIDTH, y))
+    _BACKGROUND_CACHE[key] = surface
+    return surface
 
 # Create sound effects with better parameters
 JUMP_SOUND = audio.create_sound_effect(600, 0.15, 0.4)  # Higher pitch, longer duration
@@ -69,6 +173,1050 @@ stop_background_music = audio.stop_background_music
 return_to_normal_music = audio.return_to_normal_music
 set_music_volume = audio.set_music_volume
 
+class Shuttlecock:
+    def __init__(self, x, y, direction, speed=4):
+        self.rect = pygame.Rect(x, y, 12, 20)
+        self.direction = direction  # -1 for left, 1 for right
+        self.speed = speed
+        self.rotation = 0
+        self.gravity = 0.3  # Shuttlecocks fall slowly due to feathers
+        self.vy = -2  # Initial upward velocity
+        
+    def update(self):
+        # Horizontal movement
+        self.rect.x += self.speed * self.direction
+        
+        # Vertical movement with gravity
+        self.vy += self.gravity
+        self.rect.y += self.vy
+        
+        # Rotation for visual effect
+        self.rotation += 5
+        
+        # Remove if off screen or hit ground
+        should_remove = (self.rect.x < -100 or self.rect.x > LEVEL_END_X + 100 or 
+                        self.rect.y > HEIGHT + 50)
+        return should_remove
+    
+    def draw(self, surf, camera_x):
+        # Draw shuttlecock (birdie)
+        screen_x = self.rect.x - camera_x
+        screen_y = self.rect.y
+        
+        # Only draw if on screen
+        if screen_x > -50 and screen_x < WIDTH + 50 and screen_y > -50 and screen_y < HEIGHT + 50:
+            # Feather part (white)
+            pygame.draw.ellipse(surf, WHITE, (int(screen_x), int(screen_y), 12, 8))
+            pygame.draw.ellipse(surf, (240, 240, 240), (int(screen_x + 1), int(screen_y + 1), 10, 6))  # Highlight
+            
+            # Rubber tip (black)
+            pygame.draw.ellipse(surf, BLACK, (int(screen_x + 2), int(screen_y + 8), 8, 12))
+            pygame.draw.ellipse(surf, (60, 60, 60), (int(screen_x + 3), int(screen_y + 9), 6, 10))  # Highlight
+            
+            # Feather lines for detail
+            for i in range(3):
+                line_x = screen_x + 3 + i * 2
+                pygame.draw.line(surf, (200, 200, 200), (int(line_x), int(screen_y + 2)), 
+                               (int(line_x), int(screen_y + 6)), 1)
+
+class Slipper:
+    def __init__(self, x, y, target_x=None, target_y=None, speed=6):
+        self.rect = pygame.Rect(x, y, 20, 15)
+        self.speed = speed
+        if target_x is not None and target_y is not None:
+            # Calculate direction towards target
+            dx = target_x - x
+            dy = target_y - y
+            length = (dx**2 + dy**2)**0.5
+            if length > 0:
+                self.vx = (dx / length) * speed
+                self.vy = (dy / length) * speed
+            else:
+                self.vx = speed
+                self.vy = 0
+        else:
+            # Random direction for stage 1
+            angle = random.uniform(0, 2 * 3.14159)
+            self.vx = speed * pygame.math.Vector2(1, 0).rotate_rad(angle).x
+            self.vy = speed * pygame.math.Vector2(1, 0).rotate_rad(angle).y
+
+    def update(self):
+        self.rect.x += self.vx
+        self.rect.y += self.vy
+        
+        # Remove if off screen (using world coordinates, not screen coordinates)
+        should_remove = (self.rect.x < -200 or self.rect.x > LEVEL_END_X + 300 or 
+                        self.rect.y < -200 or self.rect.y > HEIGHT + 200)
+        return should_remove
+
+    def draw(self, surf, camera_x):
+        # Draw a realistic slipper shape
+        screen_x = self.rect.x - camera_x
+        screen_y = self.rect.y
+        
+        # Only draw if on screen
+        if screen_x > -100 and screen_x < WIDTH + 100 and screen_y > -100 and screen_y < HEIGHT + 100:
+            # Draw slipper base (main sole)
+            pygame.draw.ellipse(surf, (139, 69, 19), (int(screen_x), int(screen_y + 8), 20, 12))  # Brown sole
+            # Draw slipper top (fabric part)
+            pygame.draw.ellipse(surf, (180, 100, 60), (int(screen_x + 2), int(screen_y + 3), 16, 10))  # Lighter brown fabric
+            # Draw heel part
+            pygame.draw.ellipse(surf, (120, 60, 30), (int(screen_x + 1), int(screen_y + 12), 6, 6))  # Dark heel
+            # Draw toe part highlight
+            pygame.draw.ellipse(surf, (200, 120, 80), (int(screen_x + 12), int(screen_y + 5), 6, 6))  # Toe highlight
+
+class Boss:
+    def __init__(self, x, y, level=1):
+        self.rect = pygame.Rect(x, y, 80, 80)
+        self.health = 3  # Three stages
+        self.stage = 1
+        self.level = level  # Boss level (increases every 5 game levels)
+        self.speed = 1.5 + (level - 1) * 0.3  # Slower movement, less speed increase per level
+        self.direction = 1
+        self.slipper_timer = 0
+        self.slipper_cooldown = max(90 - (level - 1) * 8, 50)  # Slower slipper throwing, longer cooldown
+        self.move_timer = 0
+        self.move_duration = 180  # Moves for longer periods (more predictable)
+        self.slippers = []
+        self.hit_invulnerable = 0  # Invulnerability frames after being hit
+        self.shout_frames = 0  # Frames to show "AHAAAAN!!" yelling
+        self.attack_warning_frames = 0
+
+    def update(self, player):
+        if self.hit_invulnerable > 0:
+            self.hit_invulnerable -= 1
+            
+        # Update shout timer
+        if self.shout_frames > 0:
+            self.shout_frames -= 1
+        if self.attack_warning_frames > 0:
+            self.attack_warning_frames -= 1
+
+        # Stage-specific behavior
+        if self.stage == 1:
+            # Stage 1: Stationary, throws slippers in all directions
+            self.slipper_timer += 1
+            if self.slipper_timer >= self.slipper_cooldown - 18:
+                self.attack_warning_frames = max(self.attack_warning_frames, 6)
+            if self.slipper_timer >= self.slipper_cooldown:
+                self.throw_random_slippers()
+                self.slipper_timer = 0
+                # Mom yells when throwing slippers
+                self.shout_frames = 30  # Show "AHAAAAN!!" for 30 frames
+
+        elif self.stage == 2:
+            # Stage 2: Stationary, throws targeted slippers
+            self.slipper_timer += 1
+            if self.slipper_timer >= int(self.slipper_cooldown * 0.8) - 14:
+                self.attack_warning_frames = max(self.attack_warning_frames, 6)
+            if self.slipper_timer >= int(self.slipper_cooldown * 0.8):  # Slightly faster than stage 1, but not too fast
+                self.throw_targeted_slipper(player)
+                self.slipper_timer = 0
+                # Mom yells when throwing slippers
+                self.shout_frames = 30  # Show "AHAAAAN!!" for 30 frames
+
+        elif self.stage == 3:
+            # Stage 3: Moves around and throws targeted slippers
+            self.move_timer += 1
+            if self.move_timer >= self.move_duration:
+                self.direction *= -1
+                self.move_timer = 0
+
+            # Move horizontally with improved boundaries
+            self.rect.x += self.speed * self.direction
+            
+            # Better boundary checking to keep boss on screen
+            # Left boundary - keep boss at least 100 pixels from left edge
+            if self.rect.left <= 100:
+                self.rect.left = 100
+                self.direction = 1
+            # Right boundary - keep boss at least 100 pixels from right edge
+            elif self.rect.right >= LEVEL_END_X - 100:
+                self.rect.right = LEVEL_END_X - 100
+                self.direction = -1
+                
+            # Additional safety check to prevent going off level completely
+            if self.rect.centerx < 150:
+                self.rect.centerx = 150
+                self.direction = 1
+            elif self.rect.centerx > LEVEL_END_X - 150:
+                self.rect.centerx = LEVEL_END_X - 150
+                self.direction = -1
+                
+            # Vertical boundary checking to keep boss above ground
+            if self.rect.bottom > HEIGHT - 80:  # Keep boss above ground level
+                self.rect.bottom = HEIGHT - 80
+            if self.rect.top < 100:  # Don't let boss go too high
+                self.rect.top = 100
+
+            # Throw slippers
+            self.slipper_timer += 1
+            if self.slipper_timer >= int(self.slipper_cooldown * 0.6) - 10:
+                self.attack_warning_frames = max(self.attack_warning_frames, 6)
+            if self.slipper_timer >= int(self.slipper_cooldown * 0.6):  # Faster than stage 2, but not overwhelming
+                self.throw_targeted_slipper(player)
+                self.slipper_timer = 0
+                # Mom yells when throwing slippers
+                self.shout_frames = 30  # Show "AHAAAAN!!" for 30 frames
+
+        # Update slippers
+        self.slippers = [s for s in self.slippers if not s.update()]
+        
+        # Global boundary enforcement for all stages
+        # Ensure boss never goes outside level bounds regardless of stage
+        if self.rect.left < 50:
+            self.rect.left = 50
+        if self.rect.right > LEVEL_END_X - 50:
+            self.rect.right = LEVEL_END_X - 50
+        if self.rect.bottom > HEIGHT - 60:
+            self.rect.bottom = HEIGHT - 60
+        if self.rect.top < 80:
+            self.rect.top = 80
+
+    def throw_random_slippers(self):
+        # Throw 3-4 slippers in different directions (reduced from 4-6)
+        num_slippers = random.randint(3, 4)
+        for _ in range(num_slippers):
+            slipper = Slipper(self.rect.centerx, self.rect.centery, None, None, 3 + self.level * 0.5)  # Slower slippers
+            self.slippers.append(slipper)
+
+    def throw_targeted_slipper(self, player):
+        # Throw slipper towards player (slower speed)
+        slipper = Slipper(self.rect.centerx, self.rect.centery, 
+                         player.rect.centerx, player.rect.centery, speed=4 + self.level * 0.5)  # Slower targeted slippers
+        self.slippers.append(slipper)
+
+    def take_damage(self):
+        if self.hit_invulnerable <= 0:
+            self.health -= 1
+            self.stage += 1
+            self.hit_invulnerable = 180  # 3 seconds of invulnerability (increased from 2 seconds)
+            return True
+        return False
+
+    def is_defeated(self):
+        return self.health <= 0
+
+    def draw(self, surf, camera_x):
+        # Flash when invulnerable
+        if self.hit_invulnerable > 0 and self.hit_invulnerable % 10 < 5:
+            return
+
+        # Draw boss (mom)
+        # Body
+        pygame.draw.ellipse(surf, (255, 182, 193), (self.rect.x - camera_x, self.rect.y + 30, self.rect.w, self.rect.h - 30))
+        # Head
+        pygame.draw.ellipse(surf, SKIN, (self.rect.x + 15 - camera_x, self.rect.y, self.rect.w - 30, 40))
+        # Hair
+        pygame.draw.ellipse(surf, BROWN, (self.rect.x + 10 - camera_x, self.rect.y - 5, self.rect.w - 20, 25))
+        # Eyes
+        pygame.draw.ellipse(surf, BLACK, (self.rect.x + 25 - camera_x, self.rect.y + 15, 8, 8))
+        pygame.draw.ellipse(surf, BLACK, (self.rect.x + 45 - camera_x, self.rect.y + 15, 8, 8))
+        # Angry mouth
+        pygame.draw.arc(surf, BLACK, (self.rect.x + 30 - camera_x, self.rect.y + 25, 20, 10), 0, 3.14, 3)
+
+        # Draw "AHAAAAN!!" yelling bubble if mom is shouting
+        if self.shout_frames > 0:
+            font = pygame.font.Font(None, 30)
+            shout = font.render("AHAAAAN!!", True, YELLOW, BLACK)
+            surf.blit(shout, (self.rect.x - camera_x + 10, self.rect.y - 30))
+
+        # Draw health indicator
+        for i in range(self.health):
+            pygame.draw.circle(surf, RED, (self.rect.x - camera_x + 10 + i * 25, self.rect.y - 15), 8)
+
+        if self.attack_warning_frames > 0:
+            pygame.draw.circle(
+                surf,
+                YELLOW,
+                (self.rect.centerx - camera_x, self.rect.top - 20),
+                10,
+                3,
+            )
+
+        # Draw slippers
+        for slipper in self.slippers:
+            slipper.draw(surf, camera_x)
+
+class Mom:
+    def __init__(self, x, y):
+        self.x = x
+        self.y = y
+        self.rect = pygame.Rect(x, y-60, 46, 60)
+        self.throw_timer = 0
+        self.shout_frames = 0
+        self.slippers = []
+        
+    def update(self):
+        self.throw_timer += 1
+        # Update shout timer
+        if self.shout_frames > 0:
+            self.shout_frames -= 1
+        
+        # Throw slippers randomly
+        if self.throw_timer > random.randint(180, 300):  # Every 3-5 seconds (more reasonable pace)
+            self.throw_timer = 0
+            self.shout_frames = 30  # Show "AHAAAAN!!" for 30 frames
+            # Throw multiple slippers in different directions
+            num_slippers = random.randint(3, 5)  # Throw 3-5 slippers
+            for _ in range(num_slippers):
+                # Create slipper with random direction (no target_x, target_y)
+                slipper = Slipper(self.x + 16, self.y - 30, None, None, random.randint(4, 8))  # Slightly slower slippers
+                self.slippers.append(slipper)
+            
+        # Update slippers
+        self.slippers = [s for s in self.slippers if not s.update()]
+        
+    def draw(self, surf, camera_x):
+        # Draw mom
+        pygame.draw.ellipse(surf, (255, 182, 193), (self.x - camera_x, self.y - 25, 46, 48))  # Saree
+        pygame.draw.ellipse(surf, SKIN, (self.x + 7 - camera_x, self.y - 60, 32, 32))  # Head
+        pygame.draw.ellipse(surf, BLACK, (self.x + 15 - camera_x, self.y - 47, 6, 10))  # Left eye
+        pygame.draw.ellipse(surf, BLACK, (self.x + 27 - camera_x, self.y - 47, 6, 10))  # Right eye
+        pygame.draw.circle(surf, BLACK, (self.x + 23 - camera_x, self.y - 63), 8)  # Hair
+        pygame.draw.arc(surf, BLACK, (self.x + 15 - camera_x, self.y - 37, 16, 8), 3.5, 6.0, 2)  # Angry mouth
+        
+        # Draw "AHAAAAN!!" yelling bubble if mom is shouting
+        if self.shout_frames > 0:
+            font = pygame.font.Font(None, 30)
+            shout = font.render("AHAAAAN!!", True, YELLOW, BLACK)
+            surf.blit(shout, (self.x - camera_x + 10, self.y - 82))
+            
+        # Draw slippers
+        for slipper in self.slippers:
+            slipper.draw(surf, camera_x)
+
+class Player:
+    def __init__(self):
+        self.rect = pygame.Rect(100, 100, PLAYER_SIZE, PLAYER_SIZE)
+        self.vy = 0
+        self.on_ground = False
+        self.lives = 1
+        self.speed_boost = 0
+        self.jump_boost = 0
+        self.immunity_timer = 0
+        self.speed_timer = 0
+        self.jump_timer = 0
+        self.base_speed = PLAYER_SPEED
+        self.base_jump = JUMP_HEIGHT
+        self.coyote_time = 0
+        self.jump_buffer = 0
+        self.holding_jump = False
+        self.current_gravity = GRAVITY
+        self.current_wind = 0
+        self.coyote_frames = 8
+        self.jump_buffer_frames = 10
+        self.short_hop_gravity_boost = 0.6
+
+    def move(self, platforms, actions):
+        # Update power-up timers
+        if self.immunity_timer > 0:
+            self.immunity_timer -= 1
+        if self.speed_timer > 0:
+            self.speed_timer -= 1
+        else:
+            self.speed_boost = 0
+        if self.jump_timer > 0:
+            self.jump_timer -= 1
+        else:
+            self.jump_boost = 0
+
+        if self.coyote_time > 0:
+            self.coyote_time -= 1
+        if self.jump_buffer > 0:
+            self.jump_buffer -= 1
+
+        dx = 0
+        current_speed = self.base_speed + self.speed_boost
+
+        if actions.get("left"):
+            dx -= current_speed
+        if actions.get("right"):
+            dx += current_speed
+
+        # Mild biome wind influence on player movement.
+        dx += self.current_wind
+
+        # Clamp to world's left and right boundaries
+        new_x = self.rect.x + dx
+        if new_x < 0:
+            dx = -self.rect.x
+        elif new_x + self.rect.w > LEVEL_END_X + 70:
+            dx = (LEVEL_END_X + 70) - (self.rect.x + self.rect.w)
+        self.rect.x += dx
+
+        for plat in platforms:
+            if self.rect.colliderect(plat.rect):
+                if dx > 0:
+                    self.rect.right = plat.rect.left
+                elif dx < 0:
+                    self.rect.left = plat.rect.right
+
+        jump_pressed = actions.get("jump_pressed", False)
+        jump_held = actions.get("jump", False)
+
+        if jump_pressed:
+            self.jump_buffer = self.jump_buffer_frames
+
+        can_jump = self.on_ground or self.coyote_time > 0
+        if self.jump_buffer > 0 and can_jump:
+            current_jump = self.base_jump + self.jump_boost
+            self.vy = current_jump
+            self.on_ground = False
+            self.coyote_time = 0
+            self.jump_buffer = 0
+            play_sound(JUMP_SOUND)
+
+        # Variable jump height: early release shortens upward travel.
+        if not jump_held and self.vy < 0:
+            self.vy += self.current_gravity * self.short_hop_gravity_boost
+
+        self.vy += self.current_gravity
+        if self.vy > 15: self.vy = 15
+
+        old_bottom = self.rect.bottom
+        self.rect.y += self.vy
+
+        self.on_ground = False
+        for plat in platforms:
+            if (self.vy >= 0 and
+                old_bottom <= plat.rect.top and
+                self.rect.colliderect(plat.rect)):
+                self.rect.bottom = plat.rect.top
+                self.vy = 0
+                self.on_ground = True
+                self.coyote_time = self.coyote_frames
+            elif (self.vy < 0 and self.rect.colliderect(plat.rect)):
+                self.rect.top = plat.rect.bottom
+                self.vy = 0
+
+        if self.rect.bottom >= HEIGHT:
+            self.rect.bottom = HEIGHT
+            self.vy = 0
+            self.on_ground = True
+            self.coyote_time = self.coyote_frames
+    
+    def apply_powerup(self, power_type):
+        if power_type == 'speed':
+            self.speed_boost = 3  # +3 speed
+            self.speed_timer = 600  # 10 seconds at 60 FPS
+        elif power_type == 'jump':
+            self.jump_boost = -8  # Higher jump (more negative = higher)
+            self.jump_timer = 600  # 10 seconds at 60 FPS
+        elif power_type == 'life':
+            self.lives += 1
+    
+    def die(self):
+        if self.lives > 1:
+            self.lives -= 1
+            self.immunity_timer = 180  # 3 seconds of immunity
+            return False  # Not game over
+        else:
+            return True  # Game over
+    
+    def is_immune(self):
+        return self.immunity_timer > 0
+
+    def draw(self, surf, camera_x):
+        # Flash when immune
+        if self.is_immune() and self.immunity_timer % 10 < 5:
+            return  # Skip drawing to create flashing effect
+        
+        # Enhanced Ahaanio character design
+        x = self.rect.x - camera_x
+        y = self.rect.y
+        
+        # Body (red shirt with better shading)
+        pygame.draw.ellipse(surf, RED, (x, y+10, self.rect.w, self.rect.h-10))
+        pygame.draw.ellipse(surf, (180, 45, 60), (x+5, y+12, self.rect.w-10, self.rect.h-15))  # Shirt highlight
+        
+        # Overalls/pants (blue with details)
+        pygame.draw.ellipse(surf, BLUE, (x+10, y+25, self.rect.w-20, self.rect.h//2))
+        pygame.draw.rect(surf, (0, 100, 200), (x+15, y+28, 4, 15))  # Overall strap left
+        pygame.draw.rect(surf, (0, 100, 200), (x+31, y+28, 4, 15))  # Overall strap right
+        
+        # Head (better skin tone and shading)
+        pygame.draw.ellipse(surf, SKIN, (x+10, y+5, self.rect.w-20, self.rect.h//2))
+        pygame.draw.ellipse(surf, (240, 200, 160), (x+12, y+7, self.rect.w-24, self.rect.h//2-4))  # Face highlight
+        
+        # Hair (more detailed)
+        pygame.draw.ellipse(surf, BROWN, (x+5, y, self.rect.w-10, 20))
+        pygame.draw.circle(surf, (120, 80, 40), (x+12, y+5), 8)  # Hair tuft left
+        pygame.draw.circle(surf, (120, 80, 40), (x+38, y+5), 8)  # Hair tuft right
+        
+        # Eyes (more expressive)
+        pygame.draw.ellipse(surf, WHITE, (x+16, y+15, 8, 10))  # Left eye white
+        pygame.draw.ellipse(surf, WHITE, (x+26, y+15, 8, 10))  # Right eye white
+        pygame.draw.circle(surf, BLACK, (x+19, y+19), 3)  # Left pupil
+        pygame.draw.circle(surf, BLACK, (x+29, y+19), 3)  # Right pupil
+        pygame.draw.circle(surf, WHITE, (x+20, y+18), 1)  # Left eye shine
+        pygame.draw.circle(surf, WHITE, (x+30, y+18), 1)  # Right eye shine
+        
+        # Nose
+        pygame.draw.circle(surf, (220, 180, 140), (x+25, y+22), 2)
+        
+        # Mouth (happy expression)
+        pygame.draw.arc(surf, BLACK, (x+18, y+25, 14, 8), 0, 3.14, 2)
+        
+        # Mustache (Mario-style)
+        pygame.draw.ellipse(surf, BROWN, (x+16, y+23, 18, 4))
+
+class Enemy:
+    def __init__(self, x, y, enemy_type="homework", plat_rect=None):
+        self.rect = pygame.Rect(x, y, 34, 34)
+        self.speed = 2
+        self.direction = 1
+        # If plat_rect is not provided, create a default platform area
+        if plat_rect is None:
+            self.platform = pygame.Rect(x - 50, y, 134, 34)  # Default platform area
+        else:
+            self.platform = plat_rect
+        self.enemy_type = enemy_type  # "homework", "chores", "badminton", "shower"
+        
+        # Badminton-specific attributes
+        if self.enemy_type == "badminton":
+            self.shoot_timer = 0
+            self.shoot_cooldown = 120  # 2 seconds at 60 FPS
+            self.shuttlecocks = []
+
+    def move(self, platforms):
+        self.rect.x += self.speed * self.direction
+        if self.rect.left <= self.platform.left:
+            self.rect.left = self.platform.left
+            self.direction = 1
+        if self.rect.right >= self.platform.right:
+            self.rect.right = self.platform.right
+            self.direction = -1
+            
+        # Badminton enemy shooting logic
+        if self.enemy_type == "badminton":
+            self.shoot_timer += 1
+            if self.shoot_timer >= self.shoot_cooldown:
+                self.shoot_timer = 0
+                # Shoot shuttlecock in the direction the enemy is facing
+                shuttlecock = Shuttlecock(self.rect.centerx, self.rect.y - 10, self.direction)
+                self.shuttlecocks.append(shuttlecock)
+            
+            # Update shuttlecocks
+            self.shuttlecocks = [s for s in self.shuttlecocks if not s.update()]
+
+    def draw(self, surf, camera_x):
+        x = self.rect.x - camera_x
+        y = self.rect.y
+        w = self.rect.w
+        h = self.rect.h
+        
+        if self.enemy_type == "homework":
+            # Enhanced homework book with more detail
+            # Book cover (brown with gradient)
+            pygame.draw.rect(surf, BROWN, (x, y, w, h))
+            pygame.draw.rect(surf, (180, 120, 70), (x+2, y+2, w-4, h-4))  # Inner cover
+            
+            # Book pages (white with lines)
+            pygame.draw.rect(surf, WHITE, (x+3, y+3, w-6, h-6))
+            # Ruled lines
+            for i in range(4):
+                line_y = y + 8 + i * 6
+                pygame.draw.line(surf, (200, 200, 255), (x+5, line_y), (x+w-5, line_y), 1)
+            
+            # Book spine
+            pygame.draw.rect(surf, (100, 60, 30), (x, y, 3, h))
+            
+            # Title on cover
+            pygame.draw.rect(surf, BLACK, (x+6, y+6, w-12, 4))
+            
+        elif self.enemy_type == "chores":
+            # Enhanced broom with more detail
+            # Broom handle (wood grain effect)
+            pygame.draw.rect(surf, BROWN, (x+12, y, 8, 20))
+            pygame.draw.rect(surf, (160, 120, 80), (x+13, y, 6, 20))  # Wood highlight
+            # Wood grain lines
+            for i in range(y, y+20, 3):
+                pygame.draw.line(surf, (120, 80, 40), (x+13, i), (x+18, i), 1)
+            
+            # Broom head (bristles)
+            pygame.draw.ellipse(surf, YELLOW, (x+5, y+18, 22, 14))
+            pygame.draw.ellipse(surf, (255, 255, 150), (x+7, y+20, 18, 10))  # Bristle highlight
+            
+            # Individual bristle details
+            for i in range(6):
+                bristle_x = x + 8 + i * 3
+                pygame.draw.line(surf, (200, 180, 100), (bristle_x, y+22), (bristle_x, y+30), 1)
+            
+        elif self.enemy_type == "badminton":
+            # Enhanced badminton racket
+            # Racket frame
+            pygame.draw.ellipse(surf, RED, (x+8, y, 18, 22))
+            pygame.draw.ellipse(surf, (255, 100, 100), (x+10, y+2, 14, 18))  # Inner frame
+            
+            # Handle with grip
+            pygame.draw.rect(surf, BROWN, (x+15, y+15, 4, 17))
+            pygame.draw.rect(surf, (160, 120, 80), (x+15, y+15, 4, 17))
+            # Grip texture
+            for i in range(y+16, y+30, 2):
+                pygame.draw.line(surf, (100, 70, 40), (x+15, i), (x+18, i), 1)
+            
+            # Racket strings (crossing pattern)
+            for i in range(3):
+                string_x = x + 12 + i * 3
+                pygame.draw.line(surf, WHITE, (string_x, y+4), (string_x, y+18), 1)
+            for i in range(4):
+                string_y = y + 5 + i * 3
+                pygame.draw.line(surf, WHITE, (x+10, string_y), (x+24, string_y), 1)
+            
+            # Draw shuttlecocks
+            for shuttlecock in self.shuttlecocks:
+                shuttlecock.draw(surf, camera_x)
+                
+        elif self.enemy_type == "shower":
+            # Enhanced shower head
+            # Shower head body (metallic look)
+            pygame.draw.rect(surf, (180, 180, 180), (x+5, y+5, 24, 15))
+            pygame.draw.rect(surf, (220, 220, 220), (x+6, y+6, 22, 13))  # Metallic highlight
+            pygame.draw.rect(surf, (140, 140, 140), (x+26, y+6, 2, 13))   # Shadow edge
+            
+            # Shower holes
+            for i in range(3):
+                for j in range(6):
+                    hole_x = x + 8 + j * 3
+                    hole_y = y + 8 + i * 3
+                    pygame.draw.circle(surf, (100, 100, 100), (hole_x, hole_y), 1)
+            
+            # Water drops (animated)
+            for i in range(6):
+                drop_x = x + 8 + i * 3
+                drop_y = y + 22 + random.randint(0, 8)  # Animated falling
+                # Water drop shape
+                pygame.draw.circle(surf, BLUE, (drop_x, drop_y), 2)
+                pygame.draw.circle(surf, (150, 200, 255), (drop_x-1, drop_y-1), 1)  # Highlight
+                
+        else:
+            # Enhanced default enemy with better shading
+            # Body (shirt)
+            pygame.draw.ellipse(surf, BROWN, (x, y, w, h//2+6))
+            pygame.draw.ellipse(surf, (180, 120, 70), (x+2, y+2, w-4, h//2+2))  # Shirt highlight
+            
+            # Head
+            pygame.draw.ellipse(surf, SKIN, (x+5, y+h//2-4, w-10, h//2-2))
+            pygame.draw.ellipse(surf, (240, 200, 160), (x+7, y+h//2-2, w-14, h//2-6))  # Face highlight
+            
+            # Eyes with pupils
+            pygame.draw.ellipse(surf, WHITE, (x+11, y+13, 7, 9))  # Left eye white
+            pygame.draw.ellipse(surf, WHITE, (x+20, y+13, 7, 9))  # Right eye white
+            pygame.draw.circle(surf, BLACK, (x+14, y+16), 2)     # Left pupil
+            pygame.draw.circle(surf, BLACK, (x+23, y+16), 2)     # Right pupil
+
+class Platform:
+    def __init__(self, x, y, w, h):
+        self.rect = pygame.Rect(x, y, w, h)
+    def draw(self, surf, camera_x):
+        # Enhanced platform with brick texture and 3D effect
+        x = self.rect.x - camera_x
+        y = self.rect.y
+        w = self.rect.w
+        h = self.rect.h
+        
+        # Main platform body (darker blue)
+        pygame.draw.rect(surf, (0, 100, 180), (x+8, y, w-16, h), border_radius=9)
+        
+        # Brick pattern
+        brick_width = 24
+        brick_height = 8
+        for row in range(0, h, brick_height):
+            for col in range(0, w-16, brick_width):
+                # Alternate brick offset for realistic pattern
+                offset = (brick_width // 2) if (row // brick_height) % 2 else 0
+                brick_x = x + 8 + col + offset
+                brick_y = y + row
+                
+                if brick_x + brick_width <= x + w - 8:  # Don't draw outside platform
+                    # Brick body
+                    pygame.draw.rect(surf, BLUE, (brick_x, brick_y, brick_width-2, brick_height-1))
+                    # Brick highlight (3D effect)
+                    pygame.draw.line(surf, (100, 150, 255), (brick_x, brick_y), (brick_x + brick_width-2, brick_y))
+                    pygame.draw.line(surf, (100, 150, 255), (brick_x, brick_y), (brick_x, brick_y + brick_height-1))
+                    # Brick shadow
+                    pygame.draw.line(surf, (0, 80, 160), (brick_x + brick_width-2, brick_y), (brick_x + brick_width-2, brick_y + brick_height-1))
+                    pygame.draw.line(surf, (0, 80, 160), (brick_x, brick_y + brick_height-1), (brick_x + brick_width-2, brick_y + brick_height-1))
+        
+        # Rounded end caps with 3D shading
+        # Left cap
+        pygame.draw.ellipse(surf, BLUE, (x, y, 16, h))
+        pygame.draw.ellipse(surf, (100, 150, 255), (x+2, y+1, 12, h-2))  # Highlight
+        
+        # Right cap  
+        pygame.draw.ellipse(surf, BLUE, (x+w-16, y, 16, h))
+        pygame.draw.ellipse(surf, (0, 80, 160), (x+w-14, y+1, 12, h-2))  # Shadow
+
+class MovingPlatform(Platform):
+    def __init__(self, x, y, w, h, move_type="horizontal", distance=100, speed=2):
+        super().__init__(x, y, w, h)
+        self.start_x = x
+        self.start_y = y
+        self.move_type = move_type  # "horizontal", "vertical", or "circular"
+        self.distance = distance  # Maximum distance to move
+        self.speed = speed  # Movement speed
+        self.direction = 1  # 1 or -1 for direction
+        self.angle = 0  # For circular movement
+        
+    def update(self):
+        """Update platform position based on movement type"""
+        if self.move_type == "horizontal":
+            # Move horizontally back and forth
+            self.rect.x += self.speed * self.direction
+            
+            # Reverse direction at boundaries
+            if self.rect.x >= self.start_x + self.distance:
+                self.direction = -1
+                self.rect.x = self.start_x + self.distance
+            elif self.rect.x <= self.start_x:
+                self.direction = 1
+                self.rect.x = self.start_x
+                
+        elif self.move_type == "vertical":
+            # Move vertically up and down
+            self.rect.y += self.speed * self.direction
+            
+            # Reverse direction at boundaries
+            if self.rect.y >= self.start_y + self.distance:
+                self.direction = -1
+                self.rect.y = self.start_y + self.distance
+            elif self.rect.y <= self.start_y:
+                self.direction = 1
+                self.rect.y = self.start_y
+                
+        elif self.move_type == "circular":
+            # Move in a circular pattern
+            self.angle += self.speed * 0.05  # Adjust speed for circular motion
+            radius = self.distance // 2
+            center_x = self.start_x + radius
+            center_y = self.start_y + radius
+            
+            import math
+            self.rect.x = int(center_x + radius * math.cos(self.angle))
+            self.rect.y = int(center_y + radius * math.sin(self.angle))
+    
+    def draw(self, surf, camera_x):
+        # Draw the moving platform with a special visual effect
+        # Call parent draw method first
+        super().draw(surf, camera_x)
+        
+        # Add visual indicators for moving platform
+        x = self.rect.x - camera_x
+        y = self.rect.y
+        w = self.rect.w
+        h = self.rect.h
+        
+        # Add animated arrows or dots to show it's moving
+        if self.move_type == "horizontal":
+            # Draw horizontal arrows
+            pygame.draw.polygon(surf, YELLOW, [
+                (x + w//2 - 8, y - 8), (x + w//2 - 2, y - 5), (x + w//2 - 8, y - 2)
+            ])
+            pygame.draw.polygon(surf, YELLOW, [
+                (x + w//2 + 8, y - 8), (x + w//2 + 2, y - 5), (x + w//2 + 8, y - 2)
+            ])
+        elif self.move_type == "vertical":
+            # Draw vertical arrows
+            pygame.draw.polygon(surf, YELLOW, [
+                (x + w//2 - 3, y - 8), (x + w//2, y - 2), (x + w//2 + 3, y - 8)
+            ])
+            pygame.draw.polygon(surf, YELLOW, [
+                (x + w//2 - 3, y + h + 2), (x + w//2, y + h + 8), (x + w//2 + 3, y + h + 2)
+            ])
+        elif self.move_type == "circular":
+            # Draw circular indicator
+            pygame.draw.circle(surf, YELLOW, (x + w//2, y - 6), 3)
+            pygame.draw.circle(surf, YELLOW, (x + w//2, y - 6), 6, 2)
+
+class Coin:
+    def __init__(self, x, y):
+        self.rect = pygame.Rect(x, y, 20, 20)
+        self.rotation = 0  # For spinning animation
+    def draw(self, surf, camera_x):
+        # Animated spinning coin with 3D effect
+        self.rotation += 3  # Spin speed
+        
+        x = self.rect.x + 10 - camera_x
+        y = self.rect.y + 10
+        
+        # Create spinning effect by varying the ellipse width
+        import math
+        spin_width = int(10 * abs(math.cos(self.rotation * 0.1)))
+        
+        # Coin shadow
+        pygame.draw.ellipse(surf, (180, 150, 30), (x-11, y-9, spin_width + 2, 18))
+        
+        # Main coin body
+        pygame.draw.ellipse(surf, GOLDEN, (x-10, y-10, spin_width, 20))
+        
+        # Coin highlight (3D effect)
+        if spin_width > 3:
+            pygame.draw.ellipse(surf, (255, 240, 100), (x-8, y-8, max(1, spin_width-4), 16))
+        
+        # Inner detail (dollar sign or star when face-on)
+        if spin_width > 6:
+            # Draw a star when coin is facing forward
+            star_points = []
+            for i in range(5):
+                angle = i * 2 * math.pi / 5 - math.pi/2
+                star_x = x + 3 * math.cos(angle)
+                star_y = y + 3 * math.sin(angle)
+                star_points.append((star_x, star_y))
+            if len(star_points) >= 3:
+                pygame.draw.polygon(surf, (200, 160, 20), star_points)
+
+class Pipe:
+    def __init__(self, x, y, width=50, height=70, is_warp_pipe=False):
+        self.rect = pygame.Rect(x, y, width, height)
+        self.is_warp_pipe = is_warp_pipe
+        self.warp_timer = 0  # For animation when player can enter
+        
+    def draw(self, surf, camera_x):
+        # Enhanced pipe with better 3D effect and textures
+        x = self.rect.x - camera_x
+        y = self.rect.y
+        w = self.rect.w
+        h = self.rect.h
+        
+        # Base pipe color - special glow for warp pipes
+        base_color = PIPE_GREEN
+        rim_color = PIPE_GREEN
+        highlight_color = (40, 180, 80)
+        shadow_color = (0, 100, 40)
+        
+        if self.is_warp_pipe:
+            # Magical glowing effect for warp pipes
+            import math
+            glow_intensity = int(50 + 30 * math.sin(self.warp_timer * 0.1))
+            base_color = (0, 140 + glow_intensity//2, 51 + glow_intensity//3)
+            rim_color = (0 + glow_intensity//4, 140 + glow_intensity//2, 51 + glow_intensity//2)
+            highlight_color = (40 + glow_intensity//3, 180 + glow_intensity//4, 80 + glow_intensity//3)
+            shadow_color = (0, 100 + glow_intensity//6, 40 + glow_intensity//4)
+            self.warp_timer += 1
+        
+        # Main pipe body with 3D shading
+        pygame.draw.rect(surf, base_color, (x, y+15, w, h-15))
+        # Highlight on left side
+        pygame.draw.rect(surf, highlight_color, (x, y+15, 8, h-15))
+        # Shadow on right side
+        pygame.draw.rect(surf, shadow_color, (x+w-8, y+15, 8, h-15))
+        
+        # Pipe rim (3D ellipse effect)
+        pygame.draw.ellipse(surf, rim_color, (x-8, y, w+16, 28))
+        # Rim highlight
+        pygame.draw.ellipse(surf, highlight_color, (x-6, y+2, w+12, 24), 3)
+        # Rim shadow
+        pygame.draw.ellipse(surf, shadow_color, (x-6, y+4, w+12, 20), 2)
+        
+        # Inner pipe detail
+        pygame.draw.rect(surf, highlight_color, (x+9, y+25, 8, h-31))
+        # Inner pipe shadow
+        pygame.draw.rect(surf, shadow_color, (x+w-17, y+25, 8, h-31))
+        
+        # Pipe segments (horizontal lines for texture)
+        for i in range(y+30, y+h-10, 12):
+            pygame.draw.line(surf, shadow_color, (x+3, i), (x+w-3, i), 1)
+            pygame.draw.line(surf, highlight_color, (x+3, i+1), (x+w-3, i+1), 1)
+        
+        # Draw magical sparkles for warp pipes
+        if self.is_warp_pipe:
+            for i in range(5):  # More sparkles
+                if random.randint(1, 8) == 1:  # More frequent sparkles
+                    sparkle_x = x + random.randint(5, w-5)
+                    sparkle_y = y + random.randint(10, h-10)
+                    # Multi-colored sparkles
+                    sparkle_colors = [YELLOW, WHITE, (255, 200, 255), (200, 255, 255)]
+                    color = random.choice(sparkle_colors)
+                    pygame.draw.circle(surf, color, (sparkle_x, sparkle_y), 3)
+                    pygame.draw.circle(surf, WHITE, (sparkle_x, sparkle_y), 1)
+
+class Flag:
+    def __init__(self, x, y, height=140):
+        self.rect = pygame.Rect(x, y-height, 15, height)
+    def draw(self, surf, camera_x):
+        pole = pygame.Rect(self.rect.x-camera_x, self.rect.y, 8, self.rect.h)
+        pygame.draw.rect(surf, FLAGPOLE, pole)
+        pygame.draw.circle(surf, YELLOW, (self.rect.x-camera_x+4, self.rect.y), 8)
+        pygame.draw.polygon(surf, YELLOW, [
+            (self.rect.x-camera_x+8, self.rect.y+14),
+            (self.rect.x-camera_x+8+40, self.rect.y+34),
+            (self.rect.x-camera_x+8, self.rect.y+47)
+        ])
+
+class PowerUp:
+    def __init__(self, x, y, power_type):
+        self.rect = pygame.Rect(x, y, 25, 25)
+        self.power_type = power_type  # 'speed', 'jump', 'life', 'nintendo', 'drums', 'soccer'
+        self.collected = False
+        self.float_timer = 0
+        self.original_y = y
+        
+    def update(self):
+        # Floating animation
+        self.float_timer += 0.1
+        self.rect.y = self.original_y + int(3 * pygame.math.Vector2(0, 1).rotate(self.float_timer * 10).y)
+        
+    def draw(self, surf, camera_x):
+        if self.collected:
+            return
+            
+        if self.power_type == 'speed':
+            # Draw pizza slice (speed boost - favorite Italian food)
+            # Crust
+            pygame.draw.polygon(surf, (255, 206, 84), [
+                (self.rect.x - camera_x + 2, self.rect.y + 20),
+                (self.rect.x - camera_x + 23, self.rect.y + 20),
+                (self.rect.x - camera_x + 12, self.rect.y + 2)
+            ])
+            # Cheese
+            pygame.draw.polygon(surf, (255, 255, 153), [
+                (self.rect.x - camera_x + 4, self.rect.y + 18),
+                (self.rect.x - camera_x + 21, self.rect.y + 18),
+                (self.rect.x - camera_x + 12, self.rect.y + 4)
+            ])
+            # Pepperoni
+            pygame.draw.circle(surf, (139, 0, 0), (self.rect.x - camera_x + 10, self.rect.y + 12), 2)
+            pygame.draw.circle(surf, (139, 0, 0), (self.rect.x - camera_x + 16, self.rect.y + 15), 2)
+            
+        elif self.power_type == 'jump':
+            # Draw donut (jump boost)
+            # Outer circle
+            pygame.draw.circle(surf, (139, 69, 19), (self.rect.x - camera_x + 12, self.rect.y + 12), 11)
+            # Inner hole
+            pygame.draw.circle(surf, (92, 192, 255), (self.rect.x - camera_x + 12, self.rect.y + 12), 5)
+            # Glaze
+            pygame.draw.circle(surf, (255, 182, 193), (self.rect.x - camera_x + 12, self.rect.y + 12), 9, 2)
+            # Sprinkles
+            pygame.draw.rect(surf, RED, (self.rect.x - camera_x + 8, self.rect.y + 8, 2, 6))
+            pygame.draw.rect(surf, GREEN, (self.rect.x - camera_x + 15, self.rect.y + 10, 6, 2))
+            pygame.draw.rect(surf, BLUE, (self.rect.x - camera_x + 10, self.rect.y + 15, 2, 4))
+            
+        elif self.power_type == 'life':
+            # Draw candy (extra life)
+            # Wrapper
+            pygame.draw.ellipse(surf, RED, (self.rect.x - camera_x + 2, self.rect.y + 8, 20, 10))
+            # Candy
+            pygame.draw.ellipse(surf, (255, 182, 193), (self.rect.x - camera_x + 4, self.rect.y + 9, 16, 8))
+            # Wrapper ends
+            pygame.draw.polygon(surf, (255, 215, 0), [
+                (self.rect.x - camera_x + 2, self.rect.y + 8),
+                (self.rect.x - camera_x, self.rect.y + 5),
+                (self.rect.x - camera_x, self.rect.y + 12),
+                (self.rect.x - camera_x + 2, self.rect.y + 18)
+            ])
+            pygame.draw.polygon(surf, (255, 215, 0), [
+                (self.rect.x - camera_x + 22, self.rect.y + 8),
+                (self.rect.x - camera_x + 24, self.rect.y + 5),
+                (self.rect.x - camera_x + 24, self.rect.y + 12),
+                (self.rect.x - camera_x + 22, self.rect.y + 18)
+            ])
+            
+        elif self.power_type == 'nintendo':
+            # Draw Nintendo Switch (gaming device - Ahaan's interest)
+            pygame.draw.rect(surf, BLACK, (self.rect.x - camera_x + 3, self.rect.y + 6, 18, 12))
+            pygame.draw.rect(surf, (100, 100, 100), (self.rect.x - camera_x + 5, self.rect.y + 8, 14, 8))
+            # Joy-Con controllers
+            pygame.draw.rect(surf, BLUE, (self.rect.x - camera_x, self.rect.y + 8, 4, 8))
+            pygame.draw.rect(surf, RED, (self.rect.x - camera_x + 20, self.rect.y + 8, 4, 8))
+            
+        elif self.power_type == 'drums':
+            # Draw drum set (music - Ahaan's interest)
+            pygame.draw.ellipse(surf, (139, 69, 19), (self.rect.x - camera_x + 5, self.rect.y + 10, 15, 10))
+            pygame.draw.ellipse(surf, (160, 82, 45), (self.rect.x - camera_x + 6, self.rect.y + 11, 13, 8))
+            # Drumsticks
+            pygame.draw.line(surf, BROWN, (self.rect.x - camera_x + 8, self.rect.y + 5), 
+                           (self.rect.x - camera_x + 10, self.rect.y + 12), 2)
+            pygame.draw.line(surf, BROWN, (self.rect.x - camera_x + 14, self.rect.y + 5), 
+                           (self.rect.x - camera_x + 16, self.rect.y + 12), 2)
+                           
+        elif self.power_type == 'soccer':
+            # Draw soccer ball (sports - Ahaan's interest)
+            pygame.draw.circle(surf, WHITE, (self.rect.x - camera_x + 12, self.rect.y + 12), 10)
+            pygame.draw.circle(surf, BLACK, (self.rect.x - camera_x + 12, self.rect.y + 12), 10, 2)
+            # Soccer ball pattern
+            pygame.draw.polygon(surf, BLACK, [
+                (self.rect.x - camera_x + 12, self.rect.y + 6),
+                (self.rect.x - camera_x + 8, self.rect.y + 10),
+                (self.rect.x - camera_x + 10, self.rect.y + 15),
+                (self.rect.x - camera_x + 14, self.rect.y + 15),
+                (self.rect.x - camera_x + 16, self.rect.y + 10)
+            ])
+
+
+class SecretToken:
+    def __init__(self, x, y):
+        self.rect = pygame.Rect(x, y, 18, 18)
+        self.collected = False
+        self.spin = 0
+
+    def update(self):
+        self.spin += 0.15
+
+    def draw(self, surf, camera_x):
+        if self.collected:
+            return
+        cx = self.rect.centerx - camera_x
+        cy = self.rect.centery
+        radius = 8 + int(2 * math.sin(self.spin))
+        pygame.draw.circle(surf, (120, 0, 180), (cx, cy), radius)
+        pygame.draw.circle(surf, YELLOW, (cx, cy), max(2, radius - 4))
+        pygame.draw.circle(surf, WHITE, (cx - 2, cy - 2), 2)
+
+
+class Particle:
+    def __init__(self, x, y, color, vx=0, vy=0, life=20, radius=3):
+        self.x = float(x)
+        self.y = float(y)
+        self.vx = float(vx)
+        self.vy = float(vy)
+        self.life = life
+        self.max_life = life
+        self.color = color
+        self.radius = radius
+
+    def update(self):
+        self.x += self.vx
+        self.y += self.vy
+        self.vy += 0.08
+        self.life -= 1
+        return self.life <= 0
+
+    def draw(self, surf, camera_x):
+        if self.life <= 0:
+            return
+        fade = self.life / max(1, self.max_life)
+        r = max(1, int(self.radius * fade))
+        color = (
+            int(self.color[0] * (0.5 + fade * 0.5)),
+            int(self.color[1] * (0.5 + fade * 0.5)),
+            int(self.color[2] * (0.5 + fade * 0.5)),
+        )
+        pygame.draw.circle(surf, color, (int(self.x - camera_x), int(self.y)), r)
+
+_level_factory = LevelFactory(
+    height=HEIGHT,
+    level_end_x=LEVEL_END_X,
+    Platform=Platform,
+    MovingPlatform=MovingPlatform,
+    Enemy=Enemy,
+    Coin=Coin,
+    Pipe=Pipe,
+    Flag=Flag,
+    PowerUp=PowerUp,
+    Boss=Boss,
+)
+
+def create_normal_level(level_num=1):
+    return _level_factory.create_normal_level(level_num)
+
+def create_secret_level(secret_type=1):
+    return _level_factory.create_secret_level(secret_type)
+
+def create_boss_level(boss_level):
+    return _level_factory.create_boss_level(boss_level)
+
+
 def configure_level_difficulty(level_num, in_secret_world, enemies, boss, balance):
     scale = 1.0 + max(0, level_num - 1) * balance.get("difficulty_per_level", 0.05)
     if in_secret_world:
@@ -83,6 +1231,7 @@ def configure_level_difficulty(level_num, in_secret_world, enemies, boss, balanc
         boss.speed = clamp(boss.speed * scale, 1.2, 4.5)
         boss.slipper_cooldown = int(clamp(boss.slipper_cooldown / scale, 35, 100))
 
+
 def get_biome_modifiers(level_num, in_secret_world):
     if in_secret_world:
         return {"wind": 0.0, "gravity": 0.9}
@@ -92,6 +1241,7 @@ def get_biome_modifiers(level_num, in_secret_world):
     if pattern == 3:
         return {"wind": 0.0, "gravity": 0.92}  # sports levels: floatier
     return {"wind": 0.0, "gravity": 1.0}
+
 
 def build_secret_tokens(level_num, in_secret_world):
     if in_secret_world:
@@ -109,9 +1259,11 @@ def build_secret_tokens(level_num, in_secret_world):
         SecretToken(800, 220),
     ]
 
+
 def derive_coin_goal(coins, balance):
     ratio = float(balance.get("coin_goal_ratio", 0.6))
     return max(3, int(len(coins) * ratio))
+
 
 def main():
     screen = pygame.display.set_mode((WIDTH, HEIGHT))
@@ -185,8 +1337,7 @@ def main():
     pause_menu_selection = 0  # 0=Resume, 1=Restart, 2=Settings, 3=Home
     settings_menu_selection = 0
     rebinding_action = None
-    settings_return_state = GameState.START
-    input_state = {"story_last_space": False, "pause_key_pressed": False, "up_key_pressed": False, "down_key_pressed": False, "select_key_pressed": False}
+    settings_return_state = "START"
 
     # STORY PAGES as list of strings
     # CUTSCENE STORY SEGMENTS
@@ -212,7 +1363,7 @@ def main():
     coin_goal = derive_coin_goal(coins, balance)
 
     running = True
-    state = GameState.START
+    state = "START"
 
     while running:
         jump_pressed = False
@@ -247,37 +1398,32 @@ def main():
             "down": keys[controls["pipe_down"]] or (joystick is not None and joystick.get_axis(1) > 0.5),
             "pause_pressed": keys[controls["pause"]] or keys[controls["alt_pause"]],
         }
-        if state == GameState.START:
+        if state == "START":
             if not music_playing:
                 start_background_music()
                 set_music_volume(music_volume)
                 music_playing = True
             screen.fill(BLACK)
-            title = get_font(64).render("Super Ahaanio", True, YELLOW)
-            prompt = get_font(36).render("Press SPACE to Start", True, WHITE)
-            story_prompt = get_font(28).render("Press ENTER for Story", True, (180,180,255))
-            settings_prompt = get_font(26).render("Press O for Settings", True, (200, 220, 255))
-            level_select_prompt = get_font(26).render("Press L for Level Select", True, (200, 255, 200))
-            high_score_display = get_font(32).render(f"High Score: {high_score}", True, GOLDEN)
+            title = pygame.font.Font(None, 64).render("Super Ahaanio", True, YELLOW)
+            prompt = pygame.font.Font(None, 36).render("Press SPACE to Start", True, WHITE)
+            story_prompt = pygame.font.Font(None, 28).render("Press ENTER for Story", True, (180,180,255))
+            settings_prompt = pygame.font.Font(None, 26).render("Press O for Settings", True, (200, 220, 255))
+            high_score_display = pygame.font.Font(None, 32).render(f"High Score: {high_score}", True, GOLDEN)
             screen.blit(title, ((WIDTH-title.get_width())//2, HEIGHT//2-100))
             screen.blit(prompt, ((WIDTH-prompt.get_width())//2, HEIGHT//2-20))
             screen.blit(story_prompt, ((WIDTH-story_prompt.get_width())//2, HEIGHT//2+30))
             screen.blit(settings_prompt, ((WIDTH-settings_prompt.get_width())//2, HEIGHT//2+65))
-            screen.blit(level_select_prompt, ((WIDTH-level_select_prompt.get_width())//2, HEIGHT//2+95))
-            screen.blit(high_score_display, ((WIDTH-high_score_display.get_width())//2, HEIGHT//2+130))
+            screen.blit(high_score_display, ((WIDTH-high_score_display.get_width())//2, HEIGHT//2+100))
             pygame.display.flip()
             if keys[pygame.K_RETURN]:
-                state = GameState.STORY
+                state = "STORY"
                 story_page = 0
             elif pygame.K_o in keydown_events:
-                settings_return_state = GameState.START
-                state = GameState.SETTINGS
-            elif pygame.K_l in keydown_events:
-                level_select_cursor = 0
-                state = GameState.LEVEL_SELECT
+                settings_return_state = "START"
+                state = "SETTINGS"
             elif keys[controls["jump"]]:
                 # Reset player and level when starting game directly
-                player = Player()
+                player.__init__()
                 apply_player_profile()
                 current_level = 1
                 boss = None
@@ -291,10 +1437,10 @@ def main():
                 score = 0
                 switch_parts = {'left_controller': False, 'right_controller': False, 'screen': False}
                 switch_parts_count = 0
-                state = GameState.PLAY
+                state = "PLAY"
             clock.tick(FPS)
             continue
-        if state == GameState.SETTINGS:
+        if state == "SETTINGS":
             gameplay_fields = {
                 "difficulty_per_level": ("Diff/Level", 0.01, 0.12, 0.01, 2),
                 "combo_window_frames": ("Combo Window", 40, 140, 5, 0),
@@ -419,8 +1565,8 @@ def main():
                     state = settings_return_state
 
             screen.fill((18, 22, 35))
-            title = get_font(62).render("Settings", True, WHITE)
-            subtitle = get_font(24).render("Arrows navigate/adjust, Enter select, Esc back", True, (200, 200, 220))
+            title = pygame.font.Font(None, 62).render("Settings", True, WHITE)
+            subtitle = pygame.font.Font(None, 24).render("Arrows navigate/adjust, Enter select, Esc back", True, (200, 200, 220))
             screen.blit(title, ((WIDTH - title.get_width()) // 2, 40))
             screen.blit(subtitle, ((WIDTH - subtitle.get_width()) // 2, 95))
 
@@ -440,14 +1586,14 @@ def main():
                     value_text = f"{val:.2f}" if isinstance(val, float) else str(val)
                 elif row_type == "rebind":
                     value_text = key_label(controls[row_key])
-                line = get_font(34).render(f"{label}: {value_text}" if value_text else label, True, color)
+                line = pygame.font.Font(None, 34).render(f"{label}: {value_text}" if value_text else label, True, color)
                 screen.blit(line, (120, y))
                 if selected:
                     pygame.draw.polygon(screen, YELLOW, [(90, y + 10), (105, y + 4), (105, y + 16)])
                 y += 34
 
             if rebinding_action is not None:
-                bind_msg = get_font(30).render(
+                bind_msg = pygame.font.Font(None, 30).render(
                     f"Press a key for {rebinding_action.replace('_', ' ').title()} (Esc to cancel)",
                     True,
                     (255, 220, 140),
@@ -457,80 +1603,7 @@ def main():
             pygame.display.flip()
             clock.tick(FPS)
             continue
-        if state == GameState.LEVEL_SELECT:
-            unlocked = int(progress.get("unlocked_level", 1))
-            cols = 5
-            rows = (unlocked + cols - 1) // cols
-            screen.fill((18, 22, 35))
-            title = get_font(56).render("Level Select", True, WHITE)
-            screen.blit(title, ((WIDTH - title.get_width()) // 2, 30))
-            hint = get_font(24).render("Arrows navigate, SPACE select, ESC back", True, (180, 180, 200))
-            screen.blit(hint, ((WIDTH - hint.get_width()) // 2, 80))
-
-            if pygame.K_RIGHT in keydown_events:
-                level_select_cursor = min(level_select_cursor + 1, unlocked - 1)
-            if pygame.K_LEFT in keydown_events:
-                level_select_cursor = max(level_select_cursor - 1, 0)
-            if pygame.K_DOWN in keydown_events:
-                level_select_cursor = min(level_select_cursor + cols, unlocked - 1)
-            if pygame.K_UP in keydown_events:
-                level_select_cursor = max(level_select_cursor - cols, 0)
-
-            cell_w, cell_h = 80, 60
-            grid_w = cols * cell_w
-            start_x = (WIDTH - grid_w) // 2
-            start_y = 120
-            for i in range(unlocked):
-                r = i // cols
-                c = i % cols
-                cx = start_x + c * cell_w + cell_w // 2
-                cy = start_y + r * cell_h + cell_h // 2
-                lvl = i + 1
-                selected = i == level_select_cursor
-                is_boss = lvl % 3 == 0
-                bg_color = (80, 40, 40) if is_boss else (40, 50, 80)
-                border_color = YELLOW if selected else (100, 100, 120)
-                pygame.draw.rect(screen, bg_color, (cx - 30, cy - 20, 60, 40), border_radius=6)
-                pygame.draw.rect(screen, border_color, (cx - 30, cy - 20, 60, 40), 3, border_radius=6)
-                label = get_font(30).render(str(lvl), True, YELLOW if selected else WHITE)
-                screen.blit(label, (cx - label.get_width() // 2, cy - label.get_height() // 2))
-                if is_boss:
-                    tag = get_font(16).render("BOSS", True, RED)
-                    screen.blit(tag, (cx - tag.get_width() // 2, cy + 22))
-
-            if pygame.K_ESCAPE in keydown_events:
-                state = GameState.START
-            elif controls["jump"] in keydown_events or pygame.K_RETURN in keydown_events:
-                chosen_level = level_select_cursor + 1
-                player = Player()
-                apply_player_profile()
-                current_level = chosen_level
-                score = 0
-                switch_parts = {'left_controller': False, 'right_controller': False, 'screen': False}
-                switch_parts_count = 0
-                in_secret_world = False
-                if current_level % 3 == 0:
-                    boss_level = current_level // 3
-                    platforms, enemies, coins, pipes, flag, powerups, boss = create_boss_level(boss_level)
-                    mom = None
-                    start_boss_music()
-                else:
-                    boss = None
-                    platforms, enemies, coins, pipes, flag, powerups, mom = create_normal_level(current_level)
-                    return_to_normal_music()
-                configure_level_difficulty(current_level, in_secret_world, enemies, boss, balance)
-                secret_tokens = build_secret_tokens(current_level, in_secret_world)
-                coin_goal = derive_coin_goal(coins, balance)
-                coin_goal_done = False
-                checkpoint_x = 120
-                checkpoint_reached = False
-                camera_x = 0
-                state = GameState.PLAY
-
-            pygame.display.flip()
-            clock.tick(FPS)
-            continue
-        if state == GameState.STORY:
+        if state == "STORY":
             cutscene_timer += 1
             current_cutscene = cutscene_segments[story_page]
             
@@ -538,6 +1611,7 @@ def main():
             screen.fill((20, 20, 40))  # Dark blue background
             
             # Add animated stars background
+            import math
             for i in range(20):
                 star_x = (i * 137 + cutscene_timer) % WIDTH
                 star_y = (i * 89 + cutscene_timer // 2) % HEIGHT
@@ -547,8 +1621,8 @@ def main():
             # Render specific cutscene
             if current_cutscene == "INTRO_WORLD":
                 # Scene 1: Introduction to Super Ahaanio world
-                title = get_font(72).render("Super Ahaanio", True, GOLDEN)
-                subtitle = get_font(48).render("The Adventure Begins", True, YELLOW)
+                title = pygame.font.Font(None, 72).render("Super Ahaanio", True, GOLDEN)
+                subtitle = pygame.font.Font(None, 48).render("The Adventure Begins", True, YELLOW)
                 
                 # Animated world elements
                 bounce = int(10 * math.sin(cutscene_timer * 0.1))
@@ -571,12 +1645,12 @@ def main():
                 screen.blit(title, ((WIDTH - title.get_width()) // 2, 100))
                 screen.blit(subtitle, ((WIDTH - subtitle.get_width()) // 2, 180))
                 
-                text = get_font(36).render("In a world filled with adventure...", True, WHITE)
+                text = pygame.font.Font(None, 36).render("In a world filled with adventure...", True, WHITE)
                 screen.blit(text, ((WIDTH - text.get_width()) // 2, HEIGHT - 150))
                 
             elif current_cutscene == "INTRO_AHAAN_INTERESTS":
                 # Scene 2: Ahaan's interests and gadgets
-                title = get_font(56).render("Meet Ahaan!", True, GOLDEN)
+                title = pygame.font.Font(None, 56).render("Meet Ahaan!", True, GOLDEN)
                 screen.blit(title, ((WIDTH - title.get_width()) // 2, 50))
                 
                 # Draw enhanced Ahaan in center with more detail
@@ -716,14 +1790,14 @@ def main():
                         pygame.draw.rect(screen, (80, 80, 80), (gadget_x - 12, gadget_y - 2, 4, 4))
                         pygame.draw.rect(screen, (80, 80, 80), (gadget_x + 8, gadget_y - 2, 4, 4))
                 
-                text1 = get_font(32).render("He LOVES gadgets and music!", True, WHITE)
-                text2 = get_font(28).render("Nintendo Switch • PS5 • Drums • Apple Watch", True, YELLOW)
+                text1 = pygame.font.Font(None, 32).render("He LOVES gadgets and music!", True, WHITE)
+                text2 = pygame.font.Font(None, 28).render("Nintendo Switch • PS5 • Drums • Apple Watch", True, YELLOW)
                 screen.blit(text1, ((WIDTH - text1.get_width()) // 2, HEIGHT - 120))
                 screen.blit(text2, ((WIDTH - text2.get_width()) // 2, HEIGHT - 80))
                 
             elif current_cutscene == "INTRO_AHAAN_SPORTS":
                 # Scene 3: Ahaan's sports activities
-                title = get_font(48).render("Ahaan the Athlete!", True, GOLDEN)
+                title = pygame.font.Font(None, 48).render("Ahaan the Athlete!", True, GOLDEN)
                 screen.blit(title, ((WIDTH - title.get_width()) // 2, 50))
                 
                 # Animated sports equipment
@@ -760,14 +1834,14 @@ def main():
                 pygame.draw.circle(screen, BLACK, (board_x + 5, sports_y + 20), 5)
                 pygame.draw.circle(screen, BLACK, (board_x + 35, sports_y + 20), 5)
                 
-                text1 = get_font(32).render("He's an energetic sportsman!", True, WHITE)
-                text2 = get_font(28).render("Soccer • Basketball • Swimming • Skateboarding", True, YELLOW)
+                text1 = pygame.font.Font(None, 32).render("He's an energetic sportsman!", True, WHITE)
+                text2 = pygame.font.Font(None, 28).render("Soccer • Basketball • Swimming • Skateboarding", True, YELLOW)
                 screen.blit(text1, ((WIDTH - text1.get_width()) // 2, HEIGHT - 120))
                 screen.blit(text2, ((WIDTH - text2.get_width()) // 2, HEIGHT - 80))
                 
             elif current_cutscene == "INTRO_CHALLENGES":
                 # Scene 4: The challenges Ahaan faces
-                title = get_font(48).render("But Ahaan faces challenges...", True, RED)
+                title = pygame.font.Font(None, 48).render("But Ahaan faces challenges...", True, RED)
                 screen.blit(title, ((WIDTH - title.get_width()) // 2, 50))
                 
                 # Dark, ominous background with storm clouds
@@ -826,7 +1900,7 @@ def main():
                     symbol_x = homework_x + 30 + int(25 * math.cos(symbol_angle))
                     symbol_y = challenges_y + 20 + int(15 * math.sin(symbol_angle))
                     symbols = ["∑", "∫", "π"]
-                    symbol_font = get_font(24)
+                    symbol_font = pygame.font.Font(None, 24)
                     symbol_surf = symbol_font.render(symbols[i], True, RED)
                     screen.blit(symbol_surf, (symbol_x, symbol_y))
                 
@@ -963,14 +2037,14 @@ def main():
                                               min(255, glow_color[2] + alpha//8))
                                 pygame.draw.circle(screen, bright_color, (ring_x, ring_y), 2)
                 
-                text1 = get_font(32).render("Homework, chores, forced badminton, showers...", True, WHITE)
-                text2 = get_font(28).render("Parents yelling like villains!", True, RED)
+                text1 = pygame.font.Font(None, 32).render("Homework, chores, forced badminton, showers...", True, WHITE)
+                text2 = pygame.font.Font(None, 28).render("Parents yelling like villains!", True, RED)
                 screen.blit(text1, ((WIDTH - text1.get_width()) // 2, HEIGHT - 120))
                 screen.blit(text2, ((WIDTH - text2.get_width()) // 2, HEIGHT - 80))
                 
             elif current_cutscene == "SWITCH_GAMING":
                 # Scene 5: Ahaan gaming peacefully
-                title = get_font(48).render("One peaceful day...", True, GREEN)
+                title = pygame.font.Font(None, 48).render("One peaceful day...", True, GREEN)
                 screen.blit(title, ((WIDTH - title.get_width()) // 2, 50))
                 
                 # Enhanced room background with depth and details
@@ -1168,14 +2242,14 @@ def main():
                     particle_y = 160 + int(30 * math.sin(cutscene_timer * 0.03 + particle))
                     pygame.draw.circle(screen, (255, 255, 200), (particle_x, particle_y), 1)
                 
-                text1 = get_font(36).render("Ahaan was gaming on his Nintendo Switch", True, WHITE)
-                text2 = get_font(32).render("Peaceful and happy...", True, GREEN)
+                text1 = pygame.font.Font(None, 36).render("Ahaan was gaming on his Nintendo Switch", True, WHITE)
+                text2 = pygame.font.Font(None, 32).render("Peaceful and happy...", True, GREEN)
                 screen.blit(text1, ((WIDTH - text1.get_width()) // 2, HEIGHT - 120))
                 screen.blit(text2, ((WIDTH - text2.get_width()) // 2, HEIGHT - 80))
                 
             elif current_cutscene == "MOM_APPEARS":
                 # Scene 6: Mom suddenly appears
-                title = get_font(48).render("Suddenly...", True, RED)
+                title = pygame.font.Font(None, 48).render("Suddenly...", True, RED)
                 screen.blit(title, ((WIDTH - title.get_width()) // 2, 50))
                 
                 # Room background (same as before)
@@ -1216,8 +2290,8 @@ def main():
                     pygame.draw.ellipse(screen, WHITE, (bubble_x, bubble_y, 200, 60))
                     pygame.draw.ellipse(screen, BLACK, (bubble_x, bubble_y, 200, 60), 3)
                     
-                    text = get_font(28).render("No more games!", True, RED)
-                    text2 = get_font(24).render("You have homework!", True, BLACK)
+                    text = pygame.font.Font(None, 28).render("No more games!", True, RED)
+                    text2 = pygame.font.Font(None, 24).render("You have homework!", True, BLACK)
                     screen.blit(text, (bubble_x + 10, bubble_y + 10))
                     screen.blit(text2, (bubble_x + 10, bubble_y + 35))
                 
@@ -1230,12 +2304,12 @@ def main():
                     end_y = mom_y + 75 + int(100 * math.sin(line_angle))
                     pygame.draw.line(screen, YELLOW, (line_x, line_y), (end_x, end_y), 2)
                 
-                instruction = get_font(32).render("Mom suddenly appears!", True, WHITE)
+                instruction = pygame.font.Font(None, 32).render("Mom suddenly appears!", True, WHITE)
                 screen.blit(instruction, ((WIDTH - instruction.get_width()) // 2, HEIGHT - 100))
                 
             elif current_cutscene == "SWITCH_BREAKS":
                 # Scene 7: Nintendo Switch breaks apart
-                title = get_font(48).render("OH NO!", True, RED)
+                title = pygame.font.Font(None, 48).render("OH NO!", True, RED)
                 screen.blit(title, ((WIDTH - title.get_width()) // 2, 50))
                 
                 # Mom running away with pieces
@@ -1288,14 +2362,14 @@ def main():
                         spark_y = center_y + int(spark_dist * math.sin(spark_angle))
                         pygame.draw.circle(screen, YELLOW, (spark_x, spark_y), 3)
                 
-                text1 = get_font(36).render("The Nintendo Switch breaks apart!", True, WHITE)
-                text2 = get_font(32).render("Three pieces scattered!", True, RED)
+                text1 = pygame.font.Font(None, 36).render("The Nintendo Switch breaks apart!", True, WHITE)
+                text2 = pygame.font.Font(None, 32).render("Three pieces scattered!", True, RED)
                 screen.blit(text1, ((WIDTH - text1.get_width()) // 2, HEIGHT - 120))
                 screen.blit(text2, ((WIDTH - text2.get_width()) // 2, HEIGHT - 80))
                 
             elif current_cutscene == "CHASE_BEGINS":
                 # Scene 8: The chase begins
-                title = get_font(48).render("The Chase is On!", True, GOLDEN)
+                title = pygame.font.Font(None, 48).render("The Chase is On!", True, GOLDEN)
                 screen.blit(title, ((WIDTH - title.get_width()) // 2, 50))
                 
                 # Dynamic background with motion blur effect
@@ -1490,14 +2564,14 @@ def main():
                     dust_color = (150 + dust * 5, 130 + dust * 4, 100 + dust * 3)
                     pygame.draw.circle(screen, dust_color, (dust_x, dust_y), dust_size)
                 
-                text1 = get_font(36).render("Ahaan must collect all three pieces!", True, WHITE)
-                text2 = get_font(32).render("Defeat mom bosses to get them back!", True, YELLOW)
+                text1 = pygame.font.Font(None, 36).render("Ahaan must collect all three pieces!", True, WHITE)
+                text2 = pygame.font.Font(None, 32).render("Defeat mom bosses to get them back!", True, YELLOW)
                 screen.blit(text1, ((WIDTH - text1.get_width()) // 2, HEIGHT - 120))
                 screen.blit(text2, ((WIDTH - text2.get_width()) // 2, HEIGHT - 80))
                 
             elif current_cutscene == "READY_TO_PLAY":
                 # Scene 9: Ready to start the adventure
-                title = get_font(56).render("Are You Ready?", True, GOLDEN)
+                title = pygame.font.Font(None, 56).render("Are You Ready?", True, GOLDEN)
                 screen.blit(title, ((WIDTH - title.get_width()) // 2, 100))
                 
                 # Large Ahaan character in hero pose
@@ -1539,35 +2613,37 @@ def main():
                         pygame.draw.rect(screen, RED, (orbit_x, orbit_y, 20, 30))
                         pygame.draw.circle(screen, BLACK, (orbit_x + 10, orbit_y + 12), 4)
                 
-                subtitle = get_font(40).render("Help Ahaan get his Nintendo Switch back!", True, WHITE)
-                instruction1 = get_font(32).render("Press SPACE to begin the adventure!", True, YELLOW)
-                instruction2 = get_font(24).render("(Press S to skip story)", True, (150, 150, 150))
+                subtitle = pygame.font.Font(None, 40).render("Help Ahaan get his Nintendo Switch back!", True, WHITE)
+                instruction1 = pygame.font.Font(None, 32).render("Press SPACE to begin the adventure!", True, YELLOW)
+                instruction2 = pygame.font.Font(None, 24).render("(Press S to skip story)", True, (150, 150, 150))
                 
                 screen.blit(subtitle, ((WIDTH - subtitle.get_width()) // 2, HEIGHT - 150))
                 screen.blit(instruction1, ((WIDTH - instruction1.get_width()) // 2, HEIGHT - 100))
                 screen.blit(instruction2, ((WIDTH - instruction2.get_width()) // 2, HEIGHT - 60))
             
             # Common controls for all cutscenes
-            controls_prompt = get_font(24).render("SPACE: Next | S: Skip Story", True, WHITE)
+            controls_prompt = pygame.font.Font(None, 24).render("SPACE: Next | S: Skip Story", True, WHITE)
             screen.blit(controls_prompt, (10, HEIGHT - 30))
             
             pygame.display.flip()
             
             # Handle input
+            if not hasattr(main, 'story_last_space'):
+                main.story_last_space = False
             if keys[controls["jump"]]:
-                if not input_state["story_last_space"]:
+                if not main.story_last_space:
                     if story_page < len(cutscene_segments) - 1:
                         story_page += 1
                         cutscene_timer = 0  # Reset timer for next cutscene
                     else:
-                        state = GameState.PLAY
-                input_state["story_last_space"] = True
+                        state = "PLAY"
+                main.story_last_space = True
             else:
-                input_state["story_last_space"] = False
+                main.story_last_space = False
                 
             if keys[pygame.K_s]:
                 # Reset player and level when skipping story
-                player = Player()
+                player.__init__()
                 apply_player_profile()
                 current_level = 1
                 boss = None
@@ -1581,10 +2657,10 @@ def main():
                 score = 0
                 switch_parts = {'left_controller': False, 'right_controller': False, 'screen': False}
                 switch_parts_count = 0
-                state = GameState.PLAY
+                state = "PLAY"
             clock.tick(FPS)
             continue
-        if state == GameState.GAMEOVER:
+        if state == "GAMEOVER":
             play_sound(GAME_OVER_SOUND)
             
             # Check for new high score
@@ -1593,15 +2669,15 @@ def main():
             progress["best_score"] = max(int(progress.get("best_score", 0)), score)
             
             screen.fill(BLACK)
-            msg = get_font(64).render("Game Over!", True, RED)
-            score_display = get_font(36).render(f"Score: {score}", True, YELLOW)
-            level_display = get_font(36).render(f"Level: {current_level}", True, WHITE)
-            high_score_display = get_font(36).render(f"High Score: {high_score}", True, GOLDEN)
-            prompt = get_font(36).render("Press SPACE to Restart", True, WHITE)
+            msg = pygame.font.Font(None, 64).render("Game Over!", True, RED)
+            score_display = pygame.font.Font(None, 36).render(f"Score: {score}", True, YELLOW)
+            level_display = pygame.font.Font(None, 36).render(f"Level: {current_level}", True, WHITE)
+            high_score_display = pygame.font.Font(None, 36).render(f"High Score: {high_score}", True, GOLDEN)
+            prompt = pygame.font.Font(None, 36).render("Press SPACE to Restart", True, WHITE)
             
             # Show "NEW HIGH SCORE!" message if applicable
             if is_new_high_score:
-                new_record_msg = get_font(48).render("NEW HIGH SCORE!", True, GOLDEN)
+                new_record_msg = pygame.font.Font(None, 48).render("NEW HIGH SCORE!", True, GOLDEN)
                 screen.blit(new_record_msg, ((WIDTH-new_record_msg.get_width())//2, HEIGHT//2-120))
             
             screen.blit(msg, ((WIDTH-msg.get_width())//2, HEIGHT//2-70))
@@ -1611,7 +2687,7 @@ def main():
             screen.blit(prompt, ((WIDTH-prompt.get_width())//2, HEIGHT//2+90))
             pygame.display.flip()
             if keys[controls["jump"]]:
-                player = Player()
+                player.__init__()
                 apply_player_profile()
                 current_level = 1
                 boss = None
@@ -1622,23 +2698,23 @@ def main():
                 coin_goal_done = False
                 checkpoint_x = 120
                 checkpoint_reached = False
-                state = GameState.PLAY
+                state = "PLAY"
                 score = 0
                 switch_parts = {'left_controller': False, 'right_controller': False, 'screen': False}
                 switch_parts_count = 0
             clock.tick(FPS)
             continue
-        if state == GameState.COMPLETE:
+        if state == "COMPLETE":
             play_sound(LEVEL_COMPLETE_SOUND)
             screen.fill(BLACK)
             if current_level % 3 == 0:
-                msg = get_font(64).render("Boss Defeated!", True, YELLOW)
+                msg = pygame.font.Font(None, 64).render("Boss Defeated!", True, YELLOW)
             else:
-                msg = get_font(64).render("Level Complete!", True, YELLOW)
-            score_display = get_font(36).render(f"Score: {score}", True, GOLDEN)
-            level_display = get_font(36).render(f"Level: {current_level}", True, WHITE)
-            high_score_display = get_font(32).render(f"High Score: {high_score}", True, GOLDEN)
-            prompt = get_font(36).render("Press SPACE for Next Level", True, WHITE)
+                msg = pygame.font.Font(None, 64).render("Level Complete!", True, YELLOW)
+            score_display = pygame.font.Font(None, 36).render(f"Score: {score}", True, GOLDEN)
+            level_display = pygame.font.Font(None, 36).render(f"Level: {current_level}", True, WHITE)
+            high_score_display = pygame.font.Font(None, 32).render(f"High Score: {high_score}", True, GOLDEN)
+            prompt = pygame.font.Font(None, 36).render("Press SPACE for Next Level", True, WHITE)
             screen.blit(msg, ((WIDTH-msg.get_width())//2, HEIGHT//2-70))
             screen.blit(score_display, ((WIDTH-score_display.get_width())//2, HEIGHT//2-20))
             screen.blit(level_display, ((WIDTH-level_display.get_width())//2, HEIGHT//2+10))
@@ -1654,7 +2730,7 @@ def main():
                 saved_speed_timer = player.speed_timer
                 saved_jump_timer = player.jump_timer
                 
-                player = Player()
+                player.__init__()
                 apply_player_profile()
                 
                 # Restore power-up state
@@ -1670,12 +2746,14 @@ def main():
                 
                 # Check if next level is a boss level
                 if current_level % 3 == 0:
+                    print(f"Entering boss level {current_level}!")  # Debug message
                     boss_level = current_level // 3
                     platforms, enemies, coins, pipes, flag, powerups, boss = create_boss_level(boss_level)
                     mom = None  # No mom in boss levels
                     # Start intense boss music
                     start_boss_music()
                 else:
+                    print(f"Entering normal level {current_level}")  # Debug message
                     boss = None
                     platforms, enemies, coins, pipes, flag, powerups, mom = create_normal_level(current_level)
                     # Return to normal music for regular levels
@@ -1687,12 +2765,12 @@ def main():
                 checkpoint_x = 120
                 checkpoint_reached = False
                 
-                state = GameState.PLAY
+                state = "PLAY"
             clock.tick(FPS)
             continue
 
         # --- Nintendo Switch Cutscenes ---
-        if state == GameState.CUTSCENE_LEFT_CONTROLLER:
+        if state == "CUTSCENE_LEFT_CONTROLLER":
             cutscene_timer += 1
             
             # Dynamic background with boss defeat atmosphere
@@ -1709,10 +2787,10 @@ def main():
             title_progress = min(cutscene_timer / 60.0, 1.0)
             title_scale = int(64 * title_progress)
             if title_scale > 0:
-                title = get_font(title_scale).render("FIRST PART RETRIEVED!", True, BLUE)
+                title = pygame.font.Font(None, title_scale).render("FIRST PART RETRIEVED!", True, BLUE)
                 # Glowing effect
                 for glow in range(3):
-                    glow_surface = get_font(title_scale + glow * 2).render("FIRST PART RETRIEVED!", True, (50, 50, 150))
+                    glow_surface = pygame.font.Font(None, title_scale + glow * 2).render("FIRST PART RETRIEVED!", True, (50, 50, 150))
                     screen.blit(glow_surface, ((WIDTH-glow_surface.get_width())//2 - glow, HEIGHT//2-150 - glow))
                 screen.blit(title, ((WIDTH-title.get_width())//2, HEIGHT//2-150))
             
@@ -1815,7 +2893,7 @@ def main():
                 visible_chars = int(len(story_text) * text_progress)
                 visible_text = story_text[:visible_chars]
                 
-                story1 = get_font(32).render(visible_text, True, WHITE)
+                story1 = pygame.font.Font(None, 32).render(visible_text, True, WHITE)
                 screen.blit(story1, ((WIDTH-story1.get_width())//2, HEIGHT//2+80))
             
             if cutscene_timer > 180:
@@ -1824,12 +2902,12 @@ def main():
                 visible_chars2 = int(len(story2_text) * text_progress2)
                 visible_text2 = story2_text[:visible_chars2]
                 
-                story2 = get_font(28).render(visible_text2, True, YELLOW)
+                story2 = pygame.font.Font(None, 28).render(visible_text2, True, YELLOW)
                 screen.blit(story2, ((WIDTH-story2.get_width())//2, HEIGHT//2+110))
             
             # Controls
             if cutscene_timer > 240:
-                continue_prompt = get_font(32).render("Press SPACE to continue the adventure!", True, (150, 255, 150))
+                continue_prompt = pygame.font.Font(None, 32).render("Press SPACE to continue the adventure!", True, (150, 255, 150))
                 # Pulsing effect
                 alpha_pulse = int(200 + 55 * math.sin(cutscene_timer * 0.2))
                 screen.blit(continue_prompt, ((WIDTH-continue_prompt.get_width())//2, HEIGHT//2+150))
@@ -1837,11 +2915,11 @@ def main():
             pygame.display.flip()
             if keys[controls["jump"]] and cutscene_timer > 240:
                 cutscene_timer = 0  # Reset for next cutscene
-                state = GameState.COMPLETE
+                state = "COMPLETE"
             clock.tick(FPS)
             continue
             
-        if state == GameState.CUTSCENE_RIGHT_CONTROLLER:
+        if state == "CUTSCENE_RIGHT_CONTROLLER":
             cutscene_timer += 1
             
             # Dynamic background with escalating intensity
@@ -1859,10 +2937,10 @@ def main():
             title_progress = min(cutscene_timer / 45.0, 1.0)
             title_scale = int(72 * title_progress)
             if title_scale > 0:
-                title = get_font(title_scale).render("SECOND PART SECURED!", True, RED)
+                title = pygame.font.Font(None, title_scale).render("SECOND PART SECURED!", True, RED)
                 # Multi-layered glow for intensity
                 for glow in range(4):
-                    glow_surface = get_font(title_scale + glow * 3).render("SECOND PART SECURED!", True, (150 - glow * 20, 50, 50))
+                    glow_surface = pygame.font.Font(None, title_scale + glow * 3).render("SECOND PART SECURED!", True, (150 - glow * 20, 50, 50))
                     screen.blit(glow_surface, ((WIDTH-glow_surface.get_width())//2 - glow, HEIGHT//2-160 - glow))
                 screen.blit(title, ((WIDTH-title.get_width())//2, HEIGHT//2-160))
             
@@ -1961,7 +3039,7 @@ def main():
                 pygame.draw.circle(screen, RED, (controller_x + 8, controller_y + 65), 3)       # B button
                 
                 # Button labels
-                button_font = get_font(16)
+                button_font = pygame.font.Font(None, 16)
                 y_label = button_font.render("Y", True, BLACK)
                 a_label = button_font.render("A", True, BLACK)
                 x_label = button_font.render("X", True, BLACK)
@@ -1994,7 +3072,7 @@ def main():
                 visible_chars = int(len(story_text) * text_progress)
                 visible_text = story_text[:visible_chars]
                 
-                story1 = get_font(30).render(visible_text, True, WHITE)
+                story1 = pygame.font.Font(None, 30).render(visible_text, True, WHITE)
                 screen.blit(story1, ((WIDTH-story1.get_width())//2, HEIGHT//2+90))
             
             if cutscene_timer > 160:
@@ -2003,23 +3081,23 @@ def main():
                 visible_chars2 = int(len(story2_text) * text_progress2)
                 visible_text2 = story2_text[:visible_chars2]
                 
-                story2 = get_font(26).render(visible_text2, True, YELLOW)
+                story2 = pygame.font.Font(None, 26).render(visible_text2, True, YELLOW)
                 screen.blit(story2, ((WIDTH-story2.get_width())//2, HEIGHT//2+120))
             
             # Controls with pulsing effect
             if cutscene_timer > 220:
                 pulse_intensity = int(200 + 55 * math.sin(cutscene_timer * 0.25))
-                showdown_prompt = get_font(32).render("Press SPACE for the final showdown!", True, (255, pulse_intensity, pulse_intensity))
+                showdown_prompt = pygame.font.Font(None, 32).render("Press SPACE for the final showdown!", True, (255, pulse_intensity, pulse_intensity))
                 screen.blit(showdown_prompt, ((WIDTH-showdown_prompt.get_width())//2, HEIGHT//2+160))
             
             pygame.display.flip()
             if keys[controls["jump"]] and cutscene_timer > 220:
                 cutscene_timer = 0  # Reset for next cutscene
-                state = GameState.COMPLETE
+                state = "COMPLETE"
             clock.tick(FPS)
             continue
             
-        if state == GameState.CUTSCENE_SCREEN:
+        if state == "CUTSCENE_SCREEN":
             cutscene_timer += 1
             
             # Check if all parts are collected for different scenarios
@@ -2039,10 +3117,10 @@ def main():
                 title_progress = min(cutscene_timer / 30.0, 1.0)
                 title_scale = int(96 * title_progress)
                 if title_scale > 0:
-                    title = get_font(title_scale).render("NINTENDO SWITCH COMPLETE!", True, GREEN)
+                    title = pygame.font.Font(None, title_scale).render("NINTENDO SWITCH COMPLETE!", True, GREEN)
                     # Epic multi-layer glow
                     for glow in range(6):
-                        glow_surface = get_font(title_scale + glow * 4).render("NINTENDO SWITCH COMPLETE!", True, (50 + glow * 10, 255 - glow * 20, 50 + glow * 10))
+                        glow_surface = pygame.font.Font(None, title_scale + glow * 4).render("NINTENDO SWITCH COMPLETE!", True, (50 + glow * 10, 255 - glow * 20, 50 + glow * 10))
                         screen.blit(glow_surface, ((WIDTH-glow_surface.get_width())//2 - glow * 2, HEIGHT//2-200 - glow * 2))
                     screen.blit(title, ((WIDTH-title.get_width())//2, HEIGHT//2-200))
                 
@@ -2160,7 +3238,7 @@ def main():
                     story_text = "Ahaan defeats the final Mom boss and claims the screen!"
                     visible_chars = int(len(story_text) * text_progress)
                     visible_text = story_text[:visible_chars]
-                    story1 = get_font(32).render(visible_text, True, WHITE)
+                    story1 = pygame.font.Font(None, 32).render(visible_text, True, WHITE)
                     screen.blit(story1, ((WIDTH-story1.get_width())//2, HEIGHT//2+120))
                 
                 if cutscene_timer > 140:
@@ -2168,15 +3246,15 @@ def main():
                     story2_text = "He quickly assembles his Nintendo Switch - VICTORY IS HIS!"
                     visible_chars2 = int(len(story2_text) * text_progress2)
                     visible_text2 = story2_text[:visible_chars2]
-                    story2 = get_font(28).render(visible_text2, True, GOLDEN)
+                    story2 = pygame.font.Font(None, 28).render(visible_text2, True, GOLDEN)
                     screen.blit(story2, ((WIDTH-story2.get_width())//2, HEIGHT//2+150))
                 
                 if cutscene_timer > 200:
                     pulse_intensity = int(200 + 55 * math.sin(cutscene_timer * 0.3))
-                    finale_prompt = get_font(36).render("Press SPACE to see the grand finale!", True, (pulse_intensity, 255, pulse_intensity))
+                    finale_prompt = pygame.font.Font(None, 36).render("Press SPACE to see the grand finale!", True, (pulse_intensity, 255, pulse_intensity))
                     screen.blit(finale_prompt, ((WIDTH-finale_prompt.get_width())//2, HEIGHT//2+190))
                 
-                state_after_space = GameState.VICTORY_CUTSCENE
+                state_after_space = "VICTORY_CUTSCENE"
                 min_timer = 200
                 
             else:
@@ -2195,10 +3273,10 @@ def main():
                 title_progress = min(cutscene_timer / 40.0, 1.0)
                 title_scale = int(68 * title_progress)
                 if title_scale > 0:
-                    title = get_font(title_scale).render("FINAL PIECE OBTAINED!", True, GREEN)
+                    title = pygame.font.Font(None, title_scale).render("FINAL PIECE OBTAINED!", True, GREEN)
                     # Mysterious glow
                     for glow in range(3):
-                        glow_surface = get_font(title_scale + glow * 3).render("FINAL PIECE OBTAINED!", True, (100, 200 - glow * 30, 100))
+                        glow_surface = pygame.font.Font(None, title_scale + glow * 3).render("FINAL PIECE OBTAINED!", True, (100, 200 - glow * 30, 100))
                         screen.blit(glow_surface, ((WIDTH-glow_surface.get_width())//2 - glow, HEIGHT//2-140 - glow))
                     screen.blit(title, ((WIDTH-title.get_width())//2, HEIGHT//2-140))
                 
@@ -2259,7 +3337,7 @@ def main():
                     
                     # Question mark on screen - mystery remains
                     pygame.draw.circle(screen, YELLOW, (screen_x + 40, screen_y + 30), 8)
-                    question_font = get_font(24)
+                    question_font = pygame.font.Font(None, 24)
                     question_mark = question_font.render("?", True, BLACK)
                     screen.blit(question_mark, (screen_x + 36, screen_y + 24))
                     
@@ -2278,7 +3356,7 @@ def main():
                     story_text = "Ahaan retrieves the final piece - the Nintendo Switch screen!"
                     visible_chars = int(len(story_text) * text_progress)
                     visible_text = story_text[:visible_chars]
-                    story1 = get_font(30).render(visible_text, True, WHITE)
+                    story1 = pygame.font.Font(None, 30).render(visible_text, True, WHITE)
                     screen.blit(story1, ((WIDTH-story1.get_width())//2, HEIGHT//2+100))
                 
                 if cutscene_timer > 150:
@@ -2286,15 +3364,15 @@ def main():
                     story2_text = "But something feels different... more challenges await!"
                     visible_chars2 = int(len(story2_text) * text_progress2)
                     visible_text2 = story2_text[:visible_chars2]
-                    story2 = get_font(26).render(visible_text2, True, (255, 200, 100))
+                    story2 = pygame.font.Font(None, 26).render(visible_text2, True, (255, 200, 100))
                     screen.blit(story2, ((WIDTH-story2.get_width())//2, HEIGHT//2+130))
                 
                 if cutscene_timer > 200:
                     pulse_intensity = int(150 + 105 * math.sin(cutscene_timer * 0.2))
-                    continue_prompt = get_font(32).render("Press SPACE to continue the adventure!", True, (pulse_intensity, 255, pulse_intensity))
+                    continue_prompt = pygame.font.Font(None, 32).render("Press SPACE to continue the adventure!", True, (pulse_intensity, 255, pulse_intensity))
                     screen.blit(continue_prompt, ((WIDTH-continue_prompt.get_width())//2, HEIGHT//2+170))
                 
-                state_after_space = GameState.COMPLETE
+                state_after_space = "COMPLETE"
                 min_timer = 200
             
             pygame.display.flip()
@@ -2304,13 +3382,13 @@ def main():
             clock.tick(FPS)
             continue
             
-        if state == GameState.VICTORY_CUTSCENE:
+        if state == "VICTORY_CUTSCENE":
             screen.fill(BLACK)
             
-            title = get_font(72).render("Victory!", True, GOLDEN)
-            story1 = get_font(40).render("Ahaan assembles his Nintendo Switch and runs away!", True, WHITE)
-            story2 = get_font(40).render("'Freedom at last!' he shouts with joy!", True, WHITE)
-            story3 = get_font(32).render("Press SPACE for final congratulations!", True, YELLOW)
+            title = pygame.font.Font(None, 72).render("Victory!", True, GOLDEN)
+            story1 = pygame.font.Font(None, 40).render("Ahaan assembles his Nintendo Switch and runs away!", True, WHITE)
+            story2 = pygame.font.Font(None, 40).render("'Freedom at last!' he shouts with joy!", True, WHITE)
+            story3 = pygame.font.Font(None, 32).render("Press SPACE for final congratulations!", True, YELLOW)
             
             # Draw Ahaan running away with complete Nintendo Switch (simple representation)
             # Ahaan
@@ -2335,20 +3413,21 @@ def main():
             
             pygame.display.flip()
             if keys[controls["jump"]]:
-                state = GameState.CONGRATULATIONS
+                state = "CONGRATULATIONS"
             clock.tick(FPS)
             continue
             
-        if state == GameState.CONGRATULATIONS:
+        if state == "CONGRATULATIONS":
             screen.fill(BLACK)
             
             # Create a celebratory screen
-            cutscene_timer += 1
-            celebration_timer = cutscene_timer * 0.05
+            import math
+            import time
+            celebration_timer = time.time() * 2
             
             # Animated congratulations text with rainbow effect
             title = "Congratulations!"
-            title_font = get_font(96)
+            title_font = pygame.font.Font(None, 96)
             
             for i, letter in enumerate(title):
                 # Rainbow color effect
@@ -2365,11 +3444,11 @@ def main():
                 screen.blit(letter_surface, (letter_x, letter_y))
             
             # Final messages
-            msg1 = get_font(48).render("Ahaan has his Nintendo Switch back!", True, WHITE)
-            msg2 = get_font(36).render(f"Final Score: {score}", True, GOLDEN)
-            msg3 = get_font(36).render(f"High Score: {high_score}", True, GOLDEN)
-            msg4 = get_font(32).render("Thanks for playing Super Ahaanio!", True, YELLOW)
-            msg5 = get_font(28).render("Press SPACE to return to main menu", True, WHITE)
+            msg1 = pygame.font.Font(None, 48).render("Ahaan has his Nintendo Switch back!", True, WHITE)
+            msg2 = pygame.font.Font(None, 36).render(f"Final Score: {score}", True, GOLDEN)
+            msg3 = pygame.font.Font(None, 36).render(f"High Score: {high_score}", True, GOLDEN)
+            msg4 = pygame.font.Font(None, 32).render("Thanks for playing Super Ahaanio!", True, YELLOW)
+            msg5 = pygame.font.Font(None, 28).render("Press SPACE to return to main menu", True, WHITE)
             
             screen.blit(msg1, ((WIDTH-msg1.get_width())//2, HEIGHT//2))
             screen.blit(msg2, ((WIDTH-msg2.get_width())//2, HEIGHT//2+50))
@@ -2387,7 +3466,7 @@ def main():
             pygame.display.flip()
             if keys[controls["jump"]]:
                 # Reset for new game
-                player = Player()
+                player.__init__()
                 apply_player_profile()
                 current_level = 1
                 boss = None
@@ -2401,38 +3480,49 @@ def main():
                 coin_goal_done = False
                 checkpoint_x = 120
                 checkpoint_reached = False
-                state = GameState.START
+                state = "START"
             clock.tick(FPS)
             continue
 
         # --- Game Play ---
         # Handle pause menu
         if actions["pause_pressed"]:
-            if not input_state["pause_key_pressed"]:
+            if not hasattr(main, 'pause_key_pressed'):
+                main.pause_key_pressed = False
+            if not main.pause_key_pressed:
                 game_paused = not game_paused
                 pause_menu_selection = 0  # Reset to Resume
-            input_state["pause_key_pressed"] = True
+            main.pause_key_pressed = True
         else:
-            input_state["pause_key_pressed"] = False
-
+            if hasattr(main, 'pause_key_pressed'):
+                main.pause_key_pressed = False
+        
         if game_paused:
             # Handle pause menu navigation
             if keys[pygame.K_UP]:
-                if not input_state["up_key_pressed"]:
+                if not hasattr(main, 'up_key_pressed'):
+                    main.up_key_pressed = False
+                if not main.up_key_pressed:
                     pause_menu_selection = (pause_menu_selection - 1) % 4
-                input_state["up_key_pressed"] = True
+                main.up_key_pressed = True
             else:
-                input_state["up_key_pressed"] = False
-
+                if hasattr(main, 'up_key_pressed'):
+                    main.up_key_pressed = False
+                    
             if keys[pygame.K_DOWN]:
-                if not input_state["down_key_pressed"]:
+                if not hasattr(main, 'down_key_pressed'):
+                    main.down_key_pressed = False
+                if not main.down_key_pressed:
                     pause_menu_selection = (pause_menu_selection + 1) % 4
-                input_state["down_key_pressed"] = True
+                main.down_key_pressed = True
             else:
-                input_state["down_key_pressed"] = False
-
+                if hasattr(main, 'down_key_pressed'):
+                    main.down_key_pressed = False
+            
             if keys[controls["jump"]] or keys[pygame.K_RETURN]:
-                if not input_state["select_key_pressed"]:
+                if not hasattr(main, 'select_key_pressed'):
+                    main.select_key_pressed = False
+                if not main.select_key_pressed:
                     if pause_menu_selection == 0:  # Resume
                         game_paused = False
                     elif pause_menu_selection == 1:  # Restart Level
@@ -2440,7 +3530,7 @@ def main():
                         # Save power-up state before resetting
                         saved_lives = player.lives
                         
-                        player = Player()
+                        player.__init__()
                         apply_player_profile()
                         player.lives = max(saved_lives, 3) if settings.get("assist_mode") else saved_lives  # Keep lives but reset position
                         
@@ -2470,13 +3560,13 @@ def main():
                         
                     elif pause_menu_selection == 2:  # Settings
                         game_paused = False
-                        settings_return_state = GameState.PLAY
-                        state = GameState.SETTINGS
+                        settings_return_state = "PLAY"
+                        state = "SETTINGS"
                     elif pause_menu_selection == 3:  # Go to Home
                         game_paused = False
-                        state = GameState.START
+                        state = "START"
                         # Reset everything
-                        player = Player()
+                        player.__init__()
                         apply_player_profile()
                         current_level = 1
                         score = 0
@@ -2492,10 +3582,11 @@ def main():
                         checkpoint_reached = False
                         camera_x = 0
                         pipe_entry_timer = 0
-                input_state["select_key_pressed"] = True
+                main.select_key_pressed = True
             else:
-                input_state["select_key_pressed"] = False
-
+                if hasattr(main, 'select_key_pressed'):
+                    main.select_key_pressed = False
+            
             # Draw pause menu and skip rest of game logic
             # (Drawing code will be added later in the rendering section)
         else:
@@ -2526,8 +3617,6 @@ def main():
                     settings["music_volume"] = round(music_volume, 3)
         
             player.move(platforms, actions)
-            if player._just_jumped:
-                play_sound(JUMP_SOUND)
 
             if combo_timer > 0:
                 combo_timer -= 1
@@ -2542,7 +3631,7 @@ def main():
                 for slipper in mom.slippers[:]:
                     if player.rect.colliderect(slipper.rect) and not player.is_immune():
                         if player.die():  # Returns True if game over
-                            state = GameState.GAMEOVER
+                            state = "GAMEOVER"
                         else:
                             # Player respawned with immunity
                             play_sound(BOSS_HIT_SOUND)
@@ -2558,7 +3647,7 @@ def main():
                 for slipper in boss.slippers[:]:
                     if player.rect.colliderect(slipper.rect) and not player.is_immune():
                         if player.die():  # Returns True if game over
-                            state = GameState.GAMEOVER
+                            state = "GAMEOVER"
                         else:
                             # Player respawned with immunity
                             play_sound(BOSS_HIT_SOUND)
@@ -2583,21 +3672,21 @@ def main():
                                 if boss_number == 1 and not switch_parts['left_controller']:
                                     switch_parts['left_controller'] = True
                                     switch_parts_count += 1
-                                    state = GameState.CUTSCENE_LEFT_CONTROLLER
+                                    state = "CUTSCENE_LEFT_CONTROLLER"
                                 elif boss_number == 2 and not switch_parts['right_controller']:
                                     switch_parts['right_controller'] = True
                                     switch_parts_count += 1
-                                    state = GameState.CUTSCENE_RIGHT_CONTROLLER
+                                    state = "CUTSCENE_RIGHT_CONTROLLER"
                                 elif boss_number == 3 and not switch_parts['screen']:
                                     switch_parts['screen'] = True
                                     switch_parts_count += 1
-                                    state = GameState.CUTSCENE_SCREEN
+                                    state = "CUTSCENE_SCREEN"
                                 else:
-                                    state = GameState.COMPLETE
+                                    state = "COMPLETE"
                     elif not player.is_immune():
                         # Player touched boss but didn't stomp
                         if player.die():  # Returns True if game over
-                            state = GameState.GAMEOVER
+                            state = "GAMEOVER"
                         else:
                             # Player respawned with immunity
                             play_sound(BOSS_HIT_SOUND)
@@ -2615,7 +3704,7 @@ def main():
                     for shuttlecock in enemy.shuttlecocks[:]:
                         if player.rect.colliderect(shuttlecock.rect) and not player.is_immune():
                             if player.die():  # Returns True if game over
-                                state = GameState.GAMEOVER
+                                state = "GAMEOVER"
                             else:
                                 # Player respawned with immunity
                                 play_sound(BOSS_HIT_SOUND)
@@ -2650,7 +3739,7 @@ def main():
                     else:
                         # Player was killed by enemy
                         if player.die():  # Returns True if game over
-                            state = GameState.GAMEOVER
+                            state = "GAMEOVER"
                         else:
                             # Player respawned with immunity, play a sound
                             play_sound(BOSS_HIT_SOUND)  # Reuse boss hit sound for respawn
@@ -2853,7 +3942,7 @@ def main():
                     play_sound(LEVEL_COMPLETE_SOUND)
                 else:
                     # Normal level completion
-                    state = GameState.COMPLETE
+                    state = "COMPLETE"
         
             camera_x = player.rect.centerx - WIDTH // 2
             if camera_x < 0:
@@ -2897,7 +3986,9 @@ def main():
                 screen.fill((130, 205, 255))
         elif in_secret_world:
             # Magical rainbow background for secret worlds
-            warp_timer = cutscene_timer  # Use time for animation
+            import math
+            import time
+            warp_timer = time.time() * 100  # Use time for animation
             for y in range(HEIGHT):
                 ratio = y / HEIGHT
                 # Rainbow gradient effect
@@ -3059,23 +4150,23 @@ def main():
             particle.draw(screen, camera_draw_x)
         
         # UI elements
-        font = get_font(36)
+        font = pygame.font.Font(None, 36)
         text = font.render(f'Score: {score}', True, BLACK)
         screen.blit(text, (10, 10))
-        combo_text = get_font(28).render(f'Combo: x{max(1, combo_count)}', True, RED if combo_count > 1 else BLACK)
+        combo_text = pygame.font.Font(None, 28).render(f'Combo: x{max(1, combo_count)}', True, RED if combo_count > 1 else BLACK)
         screen.blit(combo_text, (10, 38))
         
         # Show secret world indicator
         if in_secret_world:
             level_text = font.render(f'SECRET WORLD {secret_world_type}!', True, GOLDEN)
             screen.blit(level_text, (10, 50))
-            secret_hint = get_font(24).render('Find warp pipes to return!', True, YELLOW)
+            secret_hint = pygame.font.Font(None, 24).render('Find warp pipes to return!', True, YELLOW)
             screen.blit(secret_hint, (10, 90))
         elif current_level == 5:
             # Special display for badminton level
             level_text = font.render(f'Level 5: BADMINTON COURT!', True, RED)
             screen.blit(level_text, (10, 50))
-            badminton_warning = get_font(24).render('⚠️ Forced Badminton Class! ⚠️', True, (255, 100, 100))
+            badminton_warning = pygame.font.Font(None, 24).render('⚠️ Forced Badminton Class! ⚠️', True, (255, 100, 100))
             screen.blit(badminton_warning, (10, 85))
         else:
             level_text = font.render(f'Level: {current_level}', True, BLACK)
@@ -3083,7 +4174,7 @@ def main():
             
             # Show boss music indicator
             if audio.current_music_type == "boss":
-                boss_music_indicator = get_font(28).render('♪ BOSS FIGHT ♪', True, RED)
+                boss_music_indicator = pygame.font.Font(None, 28).render('♪ BOSS FIGHT ♪', True, RED)
                 screen.blit(boss_music_indicator, (10, 85))
         
         lives_text = font.render(f'Lives: {player.lives}', True, BLACK)
@@ -3091,10 +4182,10 @@ def main():
         
         # Show Nintendo Switch parts collected
         parts_y = 160 if in_secret_world else (145 if audio.current_music_type == "boss" and not in_secret_world else 120)
-        parts_font = get_font(28)
+        parts_font = pygame.font.Font(None, 28)
         parts_text = parts_font.render(f'Switch Parts: {switch_parts_count}/3', True, BLACK)
         screen.blit(parts_text, (10, parts_y))
-        token_text = get_font(24).render(f'Secret Tokens: {tokens_collected}', True, (120, 0, 180))
+        token_text = pygame.font.Font(None, 24).render(f'Secret Tokens: {tokens_collected}', True, (120, 0, 180))
         screen.blit(token_text, (10, parts_y + 24))
         
         # Draw visual Nintendo Switch parts indicators
@@ -3134,28 +4225,28 @@ def main():
         
         if near_warp_pipe and pipe_entry_timer <= 0:
             if in_secret_world:
-                hint_text = get_font(28).render('Press DOWN to return to normal world!', True, YELLOW)
+                hint_text = pygame.font.Font(None, 28).render('Press DOWN to return to normal world!', True, YELLOW)
             else:
-                hint_text = get_font(28).render('Press DOWN to enter SECRET WORLD!', True, GOLDEN)
+                hint_text = pygame.font.Font(None, 28).render('Press DOWN to enter SECRET WORLD!', True, GOLDEN)
             screen.blit(hint_text, (WIDTH//2 - hint_text.get_width()//2, HEIGHT - 80))
         
         # Show power-up status
         ui_y_offset = 170 if in_secret_world else 130
         
         if player.speed_boost > 0:
-            speed_text = get_font(24).render(f'Speed Boost: {player.speed_timer // 60 + 1}s', True, GREEN)
+            speed_text = pygame.font.Font(None, 24).render(f'Speed Boost: {player.speed_timer // 60 + 1}s', True, GREEN)
             screen.blit(speed_text, (10, ui_y_offset))
         
         if player.jump_boost < 0:
-            jump_text = get_font(24).render(f'Jump Boost: {player.jump_timer // 60 + 1}s', True, BLUE)
+            jump_text = pygame.font.Font(None, 24).render(f'Jump Boost: {player.jump_timer // 60 + 1}s', True, BLUE)
             screen.blit(jump_text, (10, ui_y_offset + 20))
             
         if player.is_immune():
-            immune_text = get_font(24).render(f'Immune: {player.immunity_timer // 60 + 1}s', True, YELLOW)
+            immune_text = pygame.font.Font(None, 24).render(f'Immune: {player.immunity_timer // 60 + 1}s', True, YELLOW)
             screen.blit(immune_text, (10, ui_y_offset + 40))
 
         objective_color = GREEN if coin_goal_done else BLACK
-        objective_text = get_font(24).render(
+        objective_text = pygame.font.Font(None, 24).render(
             f'Objective: Coins {coin_goal - len(coins)}/{coin_goal}',
             True,
             objective_color,
@@ -3163,25 +4254,25 @@ def main():
         screen.blit(objective_text, (10, ui_y_offset + 60))
 
         if checkpoint_reached:
-            cp_text = get_font(24).render("Checkpoint Active", True, (0, 120, 0))
+            cp_text = pygame.font.Font(None, 24).render("Checkpoint Active", True, (0, 120, 0))
             screen.blit(cp_text, (10, ui_y_offset + 80))
         
         # Show boss stage if in boss fight
         if boss:
-            stage_text = get_font(28).render(f'Boss Stage: {boss.stage}/3', True, RED)
+            stage_text = pygame.font.Font(None, 28).render(f'Boss Stage: {boss.stage}/3', True, RED)
             screen.blit(stage_text, (10, ui_y_offset + 70))
         
         # Show music controls
-        controls_text = get_font(20).render('Music: +/- Volume, M Mute', True, BLACK)
+        controls_text = pygame.font.Font(None, 20).render('Music: +/- Volume, M Mute', True, BLACK)
         screen.blit(controls_text, (WIDTH - 200, 10))
         
-        volume_text = get_font(20).render(f'Vol: {int(music_volume * 100)}%', True, BLACK)
+        volume_text = pygame.font.Font(None, 20).render(f'Vol: {int(music_volume * 100)}%', True, BLACK)
         screen.blit(volume_text, (WIDTH - 200, 30))
         
         # Show pause control
-        pause_text = get_font(20).render('ESC/P: Pause', True, BLACK)
+        pause_text = pygame.font.Font(None, 20).render('ESC/P: Pause', True, BLACK)
         screen.blit(pause_text, (WIDTH - 200, 50))
-        access_text = get_font(20).render(
+        access_text = pygame.font.Font(None, 20).render(
             f"F1 Motion:{'Off' if settings.get('reduced_motion') else 'On'}  F2 Assist:{'On' if settings.get('assist_mode') else 'Off'}",
             True,
             BLACK,
@@ -3206,13 +4297,13 @@ def main():
             pygame.draw.rect(screen, BLACK, (menu_x, menu_y, menu_width, menu_height), 3)
             
             # Pause menu title
-            title_font = get_font(48)
+            title_font = pygame.font.Font(None, 48)
             title_text = title_font.render("PAUSED", True, BLACK)
             title_x = menu_x + (menu_width - title_text.get_width()) // 2
             screen.blit(title_text, (title_x, menu_y + 20))
             
             # Menu options
-            option_font = get_font(36)
+            option_font = pygame.font.Font(None, 36)
             options = ["Resume", "Restart Level", "Settings", "Go to Home"]
             
             for i, option in enumerate(options):
@@ -3233,7 +4324,7 @@ def main():
                     ])
             
             # Instructions
-            inst_font = get_font(24)
+            inst_font = pygame.font.Font(None, 24)
             inst_text = inst_font.render("↑↓ Navigate, SPACE/ENTER Select", True, BLACK)
             inst_x = menu_x + (menu_width - inst_text.get_width()) // 2
             screen.blit(inst_text, (inst_x, menu_y + menu_height - 30))
