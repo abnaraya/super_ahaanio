@@ -40,6 +40,10 @@ A basic 2D platformer game inspired by classic Super Mario Bros, built with Pyth
 
 You can extend the artwork by replacing the shape drawing in each object's `draw()` method or by using actual images/sprites for a more Mario-like feel.
 
+## Credits
+
+Built by Ahaan.
+
 ## License
 
 MIT
