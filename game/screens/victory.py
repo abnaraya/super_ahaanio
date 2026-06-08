@@ -10,10 +10,10 @@ from game import audio
 from game.constants import (
     BLACK, BLUE, GOLDEN, GREEN, RED, SKIN, WHITE, YELLOW, WIDTH, HEIGHT
 )
-from game.player import Player
+from game.persistence import update_high_score
 from game.renderer import get_font
 from game.states import GameState
-from game.level_manager import load_normal_level, apply_player_profile, reset_checkpoint, reset_camera
+from game.level_manager import reset_full_game
 
 if TYPE_CHECKING:
     from game.context import GameContext
@@ -54,6 +54,12 @@ def handle_congratulations(ctx: "GameContext", screen: pygame.Surface,
     ctx.cutscene_timer += 1
     ct = ctx.cutscene_timer * 0.05
 
+    # Update high score on victory
+    if ctx.cutscene_timer == 1:
+        is_new, hs = update_high_score(ctx.score)
+        ctx.high_score = hs
+        ctx.progress["best_score"] = max(int(ctx.progress.get("best_score", 0)), ctx.score)
+
     title_str = "Congratulations!"
     title_font = get_font(96)
     for i, letter in enumerate(title_str):
@@ -90,15 +96,5 @@ def handle_congratulations(ctx: "GameContext", screen: pygame.Surface,
 
 
 def _reset_to_start(ctx: "GameContext") -> None:
-    ctx.player = Player()
-    apply_player_profile(ctx)
-    ctx.current_level = 1
-    ctx.score = 0
-    ctx.in_secret_world = False
-    ctx.switch_parts = {'left_controller': False, 'right_controller': False, 'screen': False}
-    ctx.switch_parts_count = 0
-    load_normal_level(ctx)
-    reset_checkpoint(ctx)
-    reset_camera(ctx)
-    ctx.coin_goal_done = False
+    reset_full_game(ctx)
     ctx.cutscene_timer = 0

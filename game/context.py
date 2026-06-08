@@ -35,6 +35,7 @@ class GameContext:
     secret_tokens: List[Any] = field(default_factory=list)
 
     # --- Camera & viewport ---
+    level_end_x: int = 2000
     camera_x: float = 0.0
     screen_shake: int = 0
 
@@ -67,6 +68,23 @@ class GameContext:
 
     # --- Token tracking ---
     tokens_collected: int = 0
+    token_milestone_text: str = ""
+    token_milestone_timer: int = 0
+
+    # --- Soccer ball projectiles ---
+    soccer_balls: List[Any] = field(default_factory=list)
+
+    # --- Hit freeze (juice) ---
+    hit_freeze: int = 0
+
+    # --- Level timer ---
+    level_timer: float = 0.0
+    level_time_limit: float = 0.0
+    time_bonus_earned: bool = False
+
+    # --- Biome ---
+    biome_name: Optional[str] = None
+    lava_y: float = 650.0        # rising lava Y position (starts below screen)
 
     # --- Pause menu ---
     game_paused: bool = False
@@ -113,6 +131,9 @@ class GameContext:
         "down_key_pressed": False,
         "select_key_pressed": False,
     })
+
+    # --- Transitions ---
+    transition: Any = None
 
     # --- Joystick ---
     joystick: Any = None

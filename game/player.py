@@ -2,6 +2,7 @@ import pygame
 from game.constants import (
     WHITE, BLACK, RED, SKIN, BLUE, BROWN,
     PLAYER_SIZE, PLAYER_SPEED, JUMP_HEIGHT, GRAVITY, HEIGHT, LEVEL_END_X,
+    MAX_JUMPS, DOUBLE_JUMP_POWER,
 )
 
 
@@ -26,12 +27,25 @@ class Player:
         self.coyote_frames = 8
         self.jump_buffer_frames = 10
         self.short_hop_gravity_boost = 0.6
+        # New powerup state
+        self.invincible = False
+        self.invincible_timer = 0
+        self.aoe_stomp = False          # drums: triggers AoE next frame
+        self.has_projectile = False     # soccer: can fire a ball
+        self.facing_right = True        # track direction for projectile
+        self.fell_off_screen = False    # set True when falling into pit
+        self.jumps_remaining = MAX_JUMPS
+        self.max_jumps = MAX_JUMPS
 
     def move(self, platforms, actions):
         self._just_jumped = False
 
         if self.immunity_timer > 0:
             self.immunity_timer -= 1
+        if self.invincible_timer > 0:
+            self.invincible_timer -= 1
+        else:
+            self.invincible = False
         if self.speed_timer > 0:
             self.speed_timer -= 1
         else:
@@ -51,8 +65,10 @@ class Player:
 
         if actions.get("left"):
             dx -= current_speed
+            self.facing_right = False
         if actions.get("right"):
             dx += current_speed
+            self.facing_right = True
 
         dx += self.current_wind
 
@@ -76,13 +92,19 @@ class Player:
         if jump_pressed:
             self.jump_buffer = self.jump_buffer_frames
 
-        can_jump = self.on_ground or self.coyote_time > 0
-        if self.jump_buffer > 0 and can_jump:
+        can_ground_jump = self.on_ground or self.coyote_time > 0
+        can_air_jump = self.jumps_remaining > 0 and not can_ground_jump
+
+        if self.jump_buffer > 0 and (can_ground_jump or can_air_jump):
             current_jump = self.base_jump + self.jump_boost
+            if can_air_jump:
+                # Double jump is weaker
+                current_jump = int(current_jump * DOUBLE_JUMP_POWER)
             self.vy = current_jump
             self.on_ground = False
             self.coyote_time = 0
             self.jump_buffer = 0
+            self.jumps_remaining -= 1
             self._just_jumped = True
 
         if not jump_held and self.vy < 0:
@@ -104,15 +126,14 @@ class Player:
                 self.vy = 0
                 self.on_ground = True
                 self.coyote_time = self.coyote_frames
+                self.jumps_remaining = self.max_jumps
             elif self.vy < 0 and self.rect.colliderect(plat.rect):
                 self.rect.top = plat.rect.bottom
                 self.vy = 0
 
-        if self.rect.bottom >= HEIGHT:
-            self.rect.bottom = HEIGHT
-            self.vy = 0
-            self.on_ground = True
-            self.coyote_time = self.coyote_frames
+        # Fall death — if player falls below the screen, they die
+        if self.rect.top > HEIGHT + 50:
+            self.fell_off_screen = True
 
     def apply_powerup(self, power_type):
         if power_type == 'speed':
@@ -123,6 +144,16 @@ class Player:
             self.jump_timer = 600
         elif power_type == 'life':
             self.lives += 1
+        elif power_type == 'nintendo':
+            # Invincibility (star power) for 10 seconds
+            self.invincible = True
+            self.invincible_timer = 600
+        elif power_type == 'drums':
+            # AoE ground pound — defeats all nearby enemies
+            self.aoe_stomp = True
+        elif power_type == 'soccer':
+            # Throwable projectile
+            self.has_projectile = True
 
     def die(self):
         if self.lives > 1:
@@ -133,14 +164,20 @@ class Player:
             return True
 
     def is_immune(self):
-        return self.immunity_timer > 0
+        return self.immunity_timer > 0 or self.invincible
 
     def draw(self, surf, camera_x):
-        if self.is_immune() and self.immunity_timer % 10 < 5:
+        if self.immunity_timer > 0 and self.immunity_timer % 10 < 5:
             return
 
         x = self.rect.x - camera_x
         y = self.rect.y
+
+        # Golden glow when invincible (nintendo powerup)
+        if self.invincible:
+            glow_r = 30 + int(10 * abs(__import__('math').sin(self.invincible_timer * 0.15)))
+            pygame.draw.circle(surf, (255, 215, 0), (x + self.rect.w // 2, y + self.rect.h // 2), glow_r, 3)
+            pygame.draw.circle(surf, (255, 255, 100), (x + self.rect.w // 2, y + self.rect.h // 2), glow_r - 5, 2)
 
         pygame.draw.ellipse(surf, RED, (x, y + 10, self.rect.w, self.rect.h - 10))
         pygame.draw.ellipse(surf, (180, 45, 60), (x + 5, y + 12, self.rect.w - 10, self.rect.h - 15))

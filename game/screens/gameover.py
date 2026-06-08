@@ -8,10 +8,9 @@ import pygame
 from game import audio
 from game.constants import BLACK, GOLDEN, RED, WHITE, YELLOW, WIDTH, HEIGHT
 from game.persistence import update_high_score
-from game.player import Player
 from game.renderer import get_font
 from game.states import GameState
-from game.level_manager import load_normal_level, apply_player_profile, reset_checkpoint, reset_camera
+from game.level_manager import reset_full_game
 
 if TYPE_CHECKING:
     from game.context import GameContext
@@ -61,14 +60,4 @@ def handle(ctx: "GameContext", screen: pygame.Surface,
 
 
 def _restart(ctx: "GameContext") -> None:
-    ctx.player = Player()
-    apply_player_profile(ctx)
-    ctx.current_level = 1
-    ctx.score = 0
-    ctx.in_secret_world = False
-    ctx.switch_parts = {'left_controller': False, 'right_controller': False, 'screen': False}
-    ctx.switch_parts_count = 0
-    load_normal_level(ctx)
-    reset_checkpoint(ctx)
-    reset_camera(ctx)
-    ctx.coin_goal_done = False
+    reset_full_game(ctx)

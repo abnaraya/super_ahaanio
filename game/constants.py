@@ -20,7 +20,16 @@ PLAYER_SPEED = 5
 JUMP_HEIGHT = -22
 GRAVITY = 1
 
-LEVEL_END_X = 2000
+LEVEL_END_X = 2000   # base level width, used as default
+
+
+def level_width(level_num: int) -> int:
+    """Later levels get wider: base 2000, +200 per level, max 4000."""
+    return min(2000 + max(0, level_num - 1) * 200, 4000)
+COIN_VALUE = 10
+MAX_JUMPS = 2
+DOUBLE_JUMP_POWER = 0.7       # second jump is 70% of base
+BASE_TIME_LIMIT = 60           # seconds per 2000px of level
 
 DEFAULT_SETTINGS = {
     "reduced_motion": False,
@@ -50,6 +59,25 @@ DEFAULT_SETTINGS = {
 DEFAULT_PROGRESS = {
     "unlocked_level": 1,
     "best_score": 0,
+    "total_tokens": 0,
+}
+
+TOKEN_MILESTONES = {
+    5: ("extra_life", "+1 Life"),
+    10: ("permanent_speed", "Permanent Speed Boost"),
+    15: ("permanent_jump", "Permanent Jump Boost"),
+    20: ("triple_jump", "Triple Jump Unlocked!"),
+}
+
+# Biome definitions (applied in level_manager.get_biome_modifiers)
+BIOMES = {
+    "ice":        {"wind": 0.0, "gravity": 1.0, "friction": 0.3,
+                   "bg_top": (200, 220, 255), "bg_bottom": (240, 248, 255)},
+    "lava":       {"wind": 0.0, "gravity": 1.05, "friction": 1.0,
+                   "bg_top": (80, 20, 0), "bg_bottom": (200, 80, 20),
+                   "rising_hazard": True, "hazard_speed": 0.3},
+    "underwater": {"wind": 0.0, "gravity": 0.5, "friction": 0.85,
+                   "bg_top": (10, 40, 80), "bg_bottom": (30, 100, 140)},
 }
 
 DIFFICULTY_PRESETS = {

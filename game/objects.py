@@ -262,6 +262,30 @@ class SecretToken:
         pygame.draw.circle(surf, WHITE, (cx - 2, cy - 2), 2)
 
 
+class SoccerBall:
+    """Player-fired projectile from the soccer powerup."""
+    def __init__(self, x, y, direction):
+        self.rect = pygame.Rect(x, y, 16, 16)
+        self.speed = 8
+        self.direction = direction   # 1 = right, -1 = left
+        self.life = 120              # max frames alive
+
+    def update(self):
+        self.rect.x += self.speed * self.direction
+        self.life -= 1
+        return (self.life <= 0 or self.rect.x < -100 or
+                self.rect.x > LEVEL_END_X + 200)
+
+    def draw(self, surf, camera_x):
+        cx = self.rect.centerx - camera_x
+        cy = self.rect.centery
+        pygame.draw.circle(surf, WHITE, (cx, cy), 8)
+        pygame.draw.circle(surf, BLACK, (cx, cy), 8, 2)
+        pygame.draw.polygon(surf, BLACK, [
+            (cx, cy - 4), (cx - 3, cy), (cx - 2, cy + 3),
+            (cx + 2, cy + 3), (cx + 3, cy)])
+
+
 class Particle:
     def __init__(self, x, y, color, vx=0, vy=0, life=20, radius=3):
         self.x = float(x)

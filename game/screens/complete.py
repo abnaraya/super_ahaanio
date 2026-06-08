@@ -7,6 +7,7 @@ import pygame
 
 from game import audio
 from game.constants import BLACK, GOLDEN, RED, WHITE, YELLOW, WIDTH, HEIGHT
+from game.persistence import update_high_score, save_progress
 from game.player import Player
 from game.renderer import get_font
 from game.states import GameState
@@ -30,6 +31,10 @@ def handle(ctx: "GameContext", screen: pygame.Surface,
             _level_complete_sound = audio.create_sound_effect(1000, 0.4, 0.5)
         audio.play_sound(_level_complete_sound)
         _sound_played = True
+        # Update high score on level complete (not just game over)
+        is_new, hs = update_high_score(ctx.score)
+        ctx.high_score = hs
+        ctx.progress["best_score"] = max(int(ctx.progress.get("best_score", 0)), ctx.score)
 
     screen.fill(BLACK)
     if ctx.current_level % 3 == 0:
@@ -78,6 +83,7 @@ def _advance_level(ctx: "GameContext") -> None:
     ctx.progress["unlocked_level"] = max(
         int(ctx.progress.get("unlocked_level", 1)), ctx.current_level
     )
+    save_progress(ctx.progress)
 
     if ctx.current_level % 3 == 0:
         load_boss_level(ctx)

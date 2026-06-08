@@ -1,13 +1,69 @@
+import random as _rng
+
 from game.constants import HEIGHT, LEVEL_END_X
 from game.objects import Platform, MovingPlatform, Coin, Pipe, Flag, PowerUp
 from game.enemies import Enemy
-from game.boss import Boss
+from game.boss import Boss, Mom
+
+
+def _ground_with_pits(level_num, level_end_x=LEVEL_END_X):
+    """Build ground segments with gaps (bottomless pits).
+
+    Returns a list of Platform objects forming the ground.
+    Level 1 has no pits (safe intro). Higher levels get more/wider pits.
+    Boss and secret levels use a solid ground (no pits).
+    """
+    if level_num <= 1:
+        return [Platform(0, HEIGHT - 50, level_end_x + 200, 50)]
+
+    # Seeded so the same level always has the same pits
+    rng = _rng.Random(level_num * 7 + 3)
+    num_pits = min(2 + (level_num - 2) // 2, 5)
+    pit_width_min = 100
+    pit_width_max = min(120 + level_num * 10, 250)
+
+    segments = []
+    x = 0
+    # Reserve safe zones: start (0-250), flag area (end-200 to end), pipe positions
+    safe_zones = [(0, 280), (level_end_x - 200, level_end_x + 200)]
+    pit_positions = []
+
+    # Generate pit positions avoiding safe zones
+    attempts = 0
+    while len(pit_positions) < num_pits and attempts < 50:
+        attempts += 1
+        pit_x = rng.randint(300, level_end_x - 300)
+        pit_w = rng.randint(pit_width_min, pit_width_max)
+        # Check safe zones
+        overlaps = False
+        for sz_start, sz_end in safe_zones:
+            if pit_x < sz_end and pit_x + pit_w > sz_start:
+                overlaps = True
+                break
+        for px, pw in pit_positions:
+            if abs(pit_x - px) < pw + 200:  # min 200px between pits
+                overlaps = True
+                break
+        if not overlaps:
+            pit_positions.append((pit_x, pit_w))
+
+    pit_positions.sort()
+
+    # Build ground segments around pits
+    cursor = 0
+    for pit_x, pit_w in pit_positions:
+        if pit_x > cursor:
+            segments.append(Platform(cursor, HEIGHT - 50, pit_x - cursor, 50))
+        cursor = pit_x + pit_w
+    if cursor < level_end_x + 200:
+        segments.append(Platform(cursor, HEIGHT - 50, level_end_x + 200 - cursor, 50))
+
+    return segments
 
 
 def create_normal_level(level_num=1):
     if level_num == 5:
-        platforms = [
-            Platform(0, HEIGHT - 50, LEVEL_END_X + 100, 50),
+        elevated = [
             Platform(200, 420, 120, 20),
             Platform(400, 350, 100, 20),
             MovingPlatform(580, 280, 80, 20, "vertical", 60, 1.5),
@@ -19,13 +75,14 @@ def create_normal_level(level_num=1):
             MovingPlatform(1750, 280, 120, 20, "horizontal", 100, 1.5),
             Platform(1950, 390, 150, 20),
         ]
+        platforms = _ground_with_pits(level_num) + elevated
         enemies = [
-            Enemy(220, 420 - 34, "badminton", platforms[1].rect),
-            Enemy(420, 350 - 34, "badminton", platforms[2].rect),
-            Enemy(770, 380 - 34, "badminton", platforms[4].rect),
-            Enemy(1170, 250 - 34, "badminton", platforms[6].rect),
-            Enemy(1570, 330 - 34, "badminton", platforms[8].rect),
-            Enemy(1970, 390 - 34, "badminton", platforms[10].rect),
+            Enemy(220, 420 - 34, "badminton", elevated[0].rect),
+            Enemy(420, 350 - 34, "badminton", elevated[1].rect),
+            Enemy(770, 380 - 34, "badminton", elevated[3].rect),
+            Enemy(1170, 250 - 34, "badminton", elevated[5].rect),
+            Enemy(1570, 330 - 34, "badminton", elevated[7].rect),
+            Enemy(1970, 390 - 34, "badminton", elevated[9].rect),
         ]
         coins = [
             Coin(250, 400), Coin(280, 400), Coin(310, 400),
@@ -62,8 +119,7 @@ def create_normal_level(level_num=1):
     level_pattern = level_num % 4
 
     if level_pattern == 1:
-        platforms = [
-            Platform(0, HEIGHT - 50, LEVEL_END_X + 100, 50),
+        elevated = [
             Platform(250, 450, 100, 20),
             Platform(450, 380, 120, 20),
             MovingPlatform(650, 320, 80, 20, "vertical", 80, 1),
@@ -73,11 +129,12 @@ def create_normal_level(level_num=1):
             MovingPlatform(1600, 380, 100, 20, "vertical", 60, 1.5),
             Platform(1850, 320, 120, 20),
         ]
+        platforms = _ground_with_pits(level_num) + elevated
         enemies = [
-            Enemy(270, 450 - 34, "homework", platforms[1].rect),
-            Enemy(470, 380 - 34, "homework", platforms[2].rect),
-            Enemy(870, 280 - 34, "homework", platforms[4].rect),
-            Enemy(1370, 420 - 34, "homework", platforms[6].rect),
+            Enemy(270, 450 - 34, "homework", elevated[0].rect),
+            Enemy(470, 380 - 34, "homework", elevated[1].rect),
+            Enemy(870, 280 - 34, "homework", elevated[3].rect),
+            Enemy(1370, 420 - 34, "homework", elevated[5].rect),
         ]
         coins = [
             Coin(300, 430), Coin(500, 360), Coin(700, 300),
@@ -91,8 +148,7 @@ def create_normal_level(level_num=1):
         ]
 
     elif level_pattern == 2:
-        platforms = [
-            Platform(0, HEIGHT - 50, LEVEL_END_X + 100, 50),
+        elevated = [
             Platform(200, 420, 140, 20),
             MovingPlatform(400, 350, 100, 20, "horizontal", 100, 1.5),
             Platform(600, 280, 120, 20),
@@ -102,11 +158,12 @@ def create_normal_level(level_num=1):
             MovingPlatform(1450, 300, 120, 20, "horizontal", 80, 2),
             Platform(1700, 420, 140, 20),
         ]
+        platforms = _ground_with_pits(level_num) + elevated
         enemies = [
-            Enemy(220, 420 - 34, "chores", platforms[1].rect),
-            Enemy(820, 400 - 34, "chores", platforms[4].rect),
-            Enemy(1020, 320 - 34, "chores", platforms[5].rect),
-            Enemy(1270, 380 - 34, "chores", platforms[6].rect),
+            Enemy(220, 420 - 34, "chores", elevated[0].rect),
+            Enemy(820, 400 - 34, "chores", elevated[3].rect),
+            Enemy(1020, 320 - 34, "chores", elevated[4].rect),
+            Enemy(1270, 380 - 34, "chores", elevated[5].rect),
         ]
         coins = [
             Coin(270, 400), Coin(450, 330), Coin(650, 260),
@@ -120,8 +177,7 @@ def create_normal_level(level_num=1):
         ]
 
     elif level_pattern == 3:
-        platforms = [
-            Platform(0, HEIGHT - 50, LEVEL_END_X + 100, 50),
+        elevated = [
             Platform(300, 400, 80, 20),
             MovingPlatform(480, 320, 100, 20, "vertical", 60, 1.5),
             Platform(680, 240, 80, 20),
@@ -131,11 +187,12 @@ def create_normal_level(level_num=1):
             MovingPlatform(1600, 320, 100, 20, "circular", 60, 1),
             Platform(1800, 380, 120, 20),
         ]
+        platforms = _ground_with_pits(level_num) + elevated
         enemies = [
-            Enemy(320, 400 - 34, "badminton", platforms[1].rect),
-            Enemy(700, 240 - 34, "badminton", platforms[3].rect),
-            Enemy(1120, 280 - 34, "badminton", platforms[5].rect),
-            Enemy(1820, 380 - 34, "badminton", platforms[8].rect),
+            Enemy(320, 400 - 34, "badminton", elevated[0].rect),
+            Enemy(700, 240 - 34, "badminton", elevated[2].rect),
+            Enemy(1120, 280 - 34, "badminton", elevated[4].rect),
+            Enemy(1820, 380 - 34, "badminton", elevated[7].rect),
         ]
         coins = [
             Coin(340, 380), Coin(520, 300), Coin(720, 220),
@@ -149,8 +206,7 @@ def create_normal_level(level_num=1):
         ]
 
     else:
-        platforms = [
-            Platform(0, HEIGHT - 50, LEVEL_END_X + 100, 50),
+        elevated = [
             Platform(180, 450, 90, 15),
             Platform(350, 380, 70, 15),
             Platform(520, 320, 100, 15),
@@ -161,13 +217,14 @@ def create_normal_level(level_num=1):
             Platform(1550, 350, 100, 15),
             Platform(1750, 400, 140, 15),
         ]
+        platforms = _ground_with_pits(level_num) + elevated
         enemies = [
-            Enemy(200, 450 - 34, "shower", platforms[1].rect),
-            Enemy(370, 380 - 34, "shower", platforms[2].rect),
-            Enemy(540, 320 - 34, "shower", platforms[3].rect),
-            Enemy(920, 370 - 34, "shower", platforms[5].rect),
-            Enemy(1170, 300 - 34, "shower", platforms[6].rect),
-            Enemy(1570, 350 - 34, "shower", platforms[8].rect),
+            Enemy(200, 450 - 34, "shower", elevated[0].rect),
+            Enemy(370, 380 - 34, "shower", elevated[1].rect),
+            Enemy(540, 320 - 34, "shower", elevated[2].rect),
+            Enemy(920, 370 - 34, "shower", elevated[4].rect),
+            Enemy(1170, 300 - 34, "shower", elevated[5].rect),
+            Enemy(1570, 350 - 34, "shower", elevated[7].rect),
         ]
         coins = [
             Coin(220, 430), Coin(390, 360), Coin(560, 300),
@@ -187,7 +244,8 @@ def create_normal_level(level_num=1):
         Pipe(1380, HEIGHT - 120, 60, 70, is_warp_pipe=True),
     ]
     flag = Flag(LEVEL_END_X + 35, HEIGHT - 50)
-    mom = None
+    # Mom hazard appears in levels >= 4 (non-boss)
+    mom = Mom(LEVEL_END_X // 2, HEIGHT - 50) if level_num >= 4 else None
     return platforms, enemies, coins, pipes, flag, powerups, mom
 
 

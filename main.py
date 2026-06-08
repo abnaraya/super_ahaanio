@@ -28,6 +28,7 @@ from game.persistence import (
 )
 from game.player import Player
 from game.states import GameState
+from game.transitions import TransitionManager
 from game.level_manager import load_normal_level, apply_player_profile
 from game.controls import resolve_controls
 
@@ -141,6 +142,8 @@ def main() -> None:
     ctx.player = Player()
     apply_player_profile(ctx)
     load_normal_level(ctx)
+    ctx.transition = TransitionManager()
+    ctx.transition.start_fade_in()  # fade in on game start
 
     # --- Main loop ---
     running = True
@@ -184,6 +187,7 @@ def main() -> None:
         }
 
         # --- Dispatch to state handler ---
+        prev_state = ctx.state
         state = ctx.state
         if state == GameState.START:
             ctx.state = handle_start(ctx, screen, keydown_events, keys)
@@ -209,6 +213,13 @@ def main() -> None:
             ctx.state = handle_victory_cutscene(ctx, screen, keydown_events, keys)
         elif state == GameState.CONGRATULATIONS:
             ctx.state = handle_congratulations(ctx, screen, keydown_events, keys)
+
+        # Trigger fade on state change
+        if ctx.state != prev_state and ctx.transition:
+            ctx.transition.start_fade_in()
+        if ctx.transition:
+            ctx.transition.update()
+            ctx.transition.draw(screen)
 
         pygame.display.flip()
         clock.tick(FPS)

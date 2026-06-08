@@ -27,15 +27,18 @@ import pygame
 
 from game import audio
 from game.constants import (
-    BLACK, BLUE, BROWN, FLAGPOLE, GOLDEN, GRAVITY, GREEN, HEIGHT,
+    BLACK, BLUE, BROWN, COIN_VALUE, FLAGPOLE, GOLDEN, GRAVITY, GREEN, HEIGHT,
     JUMP_HEIGHT, LEVEL_END_X, PIPE_GREEN, RED, SKIN, WHITE, WIDTH, YELLOW,
+    FPS, TOKEN_MILESTONES,
 )
-from game.objects import Particle
+from game.objects import Particle, SoccerBall
+from game.persistence import save_progress
 from game.renderer import get_font, build_gradient_surface
 from game.states import GameState
 from game.level_manager import (
     load_normal_level, load_boss_level, load_secret_level,
     apply_player_profile, reset_checkpoint, reset_camera, get_biome_modifiers,
+    restart_current_level, go_home,
 )
 
 if TYPE_CHECKING:
@@ -120,36 +123,11 @@ def _handle_pause_input(ctx: "GameContext", keys, actions) -> GameState:
 
 
 def _restart_current_level(ctx: "GameContext") -> None:
-    from game.player import Player
-    saved_lives = ctx.player.lives
-    ctx.player = Player()
-    apply_player_profile(ctx)
-    ctx.player.lives = max(saved_lives, 3) if ctx.settings.get("assist_mode") else saved_lives
-    if ctx.in_secret_world:
-        load_secret_level(ctx)
-    elif ctx.current_level % 3 == 0:
-        load_boss_level(ctx)
-    else:
-        load_normal_level(ctx)
-    reset_checkpoint(ctx)
-    reset_camera(ctx)
-    ctx.pipe_entry_timer = 0
-    ctx.coin_goal_done = False
+    restart_current_level(ctx)
 
 
 def _go_home(ctx: "GameContext") -> None:
-    from game.player import Player
-    ctx.player = Player()
-    apply_player_profile(ctx)
-    ctx.current_level = 1
-    ctx.score = 0
-    ctx.in_secret_world = False
-    ctx.boss = None
-    load_normal_level(ctx)
-    reset_checkpoint(ctx)
-    reset_camera(ctx)
-    ctx.pipe_entry_timer = 0
-    ctx.coin_goal_done = False
+    go_home(ctx)
 
 
 # ---------------------------------------------------------------------------
@@ -158,8 +136,19 @@ def _go_home(ctx: "GameContext") -> None:
 
 def _update_game_logic(ctx: "GameContext", keys, actions, sounds) -> GameState:
     biome_mods = get_biome_modifiers(ctx.current_level, ctx.in_secret_world)
-    ctx.player.current_gravity = GRAVITY * biome_mods["gravity"]
-    ctx.player.current_wind = biome_mods["wind"]
+    ctx.player.current_gravity = GRAVITY * biome_mods.get("gravity", 1.0)
+    ctx.player.current_wind = biome_mods.get("wind", 0.0)
+
+    # Lava biome: rising hazard
+    if biome_mods.get("rising_hazard"):
+        ctx.lava_y -= biome_mods.get("hazard_speed", 0.3)
+        if ctx.player.rect.bottom >= ctx.lava_y and not ctx.player.is_immune():
+            if ctx.player.die():
+                return GameState.GAMEOVER
+            audio.play_sound(sounds["game_over"])
+            ctx.player.rect.x = ctx.checkpoint_x
+            ctx.player.rect.y = HEIGHT - 120
+            ctx.player.vy = 0
 
     # Music volume hotkeys
     if keys[pygame.K_PLUS] or keys[pygame.K_EQUALS]:
@@ -183,11 +172,30 @@ def _update_game_logic(ctx: "GameContext", keys, actions, sounds) -> GameState:
     if ctx.player._just_jumped:
         audio.play_sound(sounds["jump"])
 
+    # Fall death (bottomless pits)
+    if ctx.player.fell_off_screen:
+        ctx.player.fell_off_screen = False
+        if ctx.player.die():
+            return GameState.GAMEOVER
+        audio.play_sound(sounds["game_over"])
+        ctx.player.rect.x = ctx.checkpoint_x
+        ctx.player.rect.y = HEIGHT - 120
+        ctx.player.vy = 0
+
     # Combo timer
     if ctx.combo_timer > 0:
         ctx.combo_timer -= 1
     else:
         ctx.combo_count = 0
+
+    # Level timer
+    ctx.level_timer += 1.0 / FPS
+
+    # Hit freeze (juice)
+    if ctx.hit_freeze > 0:
+        ctx.hit_freeze -= 1
+        # Skip game logic during freeze frames (but still render)
+        return GameState.PLAY
 
     # --- Mom ---
     next_state = GameState.PLAY
@@ -222,7 +230,8 @@ def _update_game_logic(ctx: "GameContext", keys, actions, sounds) -> GameState:
                     p.vy = JUMP_HEIGHT // 2
                     ctx.score += 500
                     audio.play_sound(sounds["boss_hit"])
-                    ctx.screen_shake = 8
+                    ctx.screen_shake = 10
+                    ctx.hit_freeze = 4  # freeze frames for impact
                     if b.is_defeated():
                         ctx.score += 1000
                         boss_number = ctx.current_level // 3
@@ -272,7 +281,7 @@ def _update_game_logic(ctx: "GameContext", keys, actions, sounds) -> GameState:
                 ctx.combo_count += 1
                 ctx.combo_timer = int(ctx.balance.get("combo_window_frames", 75))
                 ctx.score += 100 * ctx.combo_count
-                audio.play_sound(sounds["stomp"])
+                audio.play_sound(sounds["enemy_defeat"])
                 ctx.screen_shake = 6
                 for _ in range(8):
                     ctx.particles.append(Particle(
@@ -291,11 +300,82 @@ def _update_game_logic(ctx: "GameContext", keys, actions, sounds) -> GameState:
     for idx in sorted(remove_enemies, reverse=True):
         del ctx.enemies[idx]
 
+    # --- AoE stomp (drums powerup) ---
+    if ctx.player.aoe_stomp:
+        ctx.player.aoe_stomp = False
+        px, py = ctx.player.rect.centerx, ctx.player.rect.centery
+        aoe_kills = 0
+        for enemy in ctx.enemies[:]:
+            dist = ((enemy.rect.centerx - px) ** 2 + (enemy.rect.centery - py) ** 2) ** 0.5
+            if dist < 200:
+                aoe_kills += 1
+                ctx.score += 100 * aoe_kills
+                for _ in range(6):
+                    ctx.particles.append(Particle(
+                        enemy.rect.centerx, enemy.rect.bottom, YELLOW,
+                        random.uniform(-3, 3), random.uniform(-3, -0.5),
+                        life=20, radius=3,
+                    ))
+                ctx.enemies.remove(enemy)
+        if aoe_kills > 0:
+            audio.play_sound(sounds["enemy_defeat"])
+            ctx.screen_shake = 10
+            # Shockwave particles
+            for i in range(16):
+                import math as _m
+                angle = i * (2 * _m.pi / 16)
+                ctx.particles.append(Particle(
+                    px, py, (255, 180, 50),
+                    3 * _m.cos(angle), 3 * _m.sin(angle),
+                    life=18, radius=2,
+                ))
+
+    # --- Invincibility contact kills (nintendo powerup) ---
+    if ctx.player.invincible:
+        for enemy in ctx.enemies[:]:
+            if ctx.player.rect.colliderect(enemy.rect):
+                ctx.score += 150
+                ctx.enemies.remove(enemy)
+                audio.play_sound(sounds["enemy_defeat"])
+                for _ in range(6):
+                    ctx.particles.append(Particle(
+                        enemy.rect.centerx, enemy.rect.bottom, (255, 215, 0),
+                        random.uniform(-2, 2), random.uniform(-3, -0.5),
+                        life=20, radius=3,
+                    ))
+
+    # --- Soccer ball projectiles ---
+    if ctx.player.has_projectile and actions.get("jump_pressed") and actions.get("down"):
+        direction = 1 if ctx.player.facing_right else -1
+        ball = SoccerBall(ctx.player.rect.centerx, ctx.player.rect.centery, direction)
+        ctx.soccer_balls.append(ball)
+        ctx.player.has_projectile = False
+        audio.play_sound(sounds["jump"])
+
+    for ball in ctx.soccer_balls[:]:
+        if ball.update():
+            ctx.soccer_balls.remove(ball)
+            continue
+        for enemy in ctx.enemies[:]:
+            if ball.rect.colliderect(enemy.rect):
+                ctx.score += 120
+                ctx.enemies.remove(enemy)
+                if ball in ctx.soccer_balls:
+                    ctx.soccer_balls.remove(ball)
+                audio.play_sound(sounds["enemy_defeat"])
+                for _ in range(6):
+                    ctx.particles.append(Particle(
+                        enemy.rect.centerx, enemy.rect.bottom, WHITE,
+                        random.uniform(-2, 2), random.uniform(-3, -0.5),
+                        life=20, radius=3,
+                    ))
+                break
+
     # --- Coins ---
     for coin in ctx.coins[:]:
         if ctx.player.rect.colliderect(coin.rect):
             ctx.coins.remove(coin)
-            ctx.score += 1
+            ctx.score += COIN_VALUE
             audio.play_sound(sounds["coin"])
             for _ in range(5):
                 ctx.particles.append(Particle(
@@ -327,7 +407,23 @@ def _update_game_logic(ctx: "GameContext", keys, actions, sounds) -> GameState:
         if not token.collected and ctx.player.rect.colliderect(token.rect):
             token.collected = True
             ctx.tokens_collected += 1
+            ctx.progress["total_tokens"] = ctx.progress.get("total_tokens", 0) + 1
             ctx.score += 200
+            # Check token milestones
+            total = ctx.progress["total_tokens"]
+            if total in TOKEN_MILESTONES:
+                reward_key, reward_name = TOKEN_MILESTONES[total]
+                if reward_key == "extra_life":
+                    ctx.player.lives += 1
+                elif reward_key == "permanent_speed":
+                    ctx.player.base_speed += 1
+                elif reward_key == "permanent_jump":
+                    ctx.player.base_jump -= 3
+                elif reward_key == "triple_jump":
+                    ctx.player.max_jumps = 3
+                    ctx.player.jumps_remaining = 3
+                ctx.token_milestone_text = reward_name
+                ctx.token_milestone_timer = 180  # show for 3 seconds
             for _ in range(12):
                 ctx.particles.append(Particle(
                     token.rect.centerx, token.rect.centery, (170, 80, 255),
@@ -365,17 +461,22 @@ def _update_game_logic(ctx: "GameContext", keys, actions, sounds) -> GameState:
             _complete_secret_world(ctx)
             audio.play_sound(sounds["level_complete"])
         else:
+            # Time bonus
+            if not ctx.time_bonus_earned and ctx.level_timer <= ctx.level_time_limit:
+                ctx.time_bonus_earned = True
+                ctx.score += 500
             return GameState.COMPLETE
 
     # --- Camera ---
     ctx.camera_x = ctx.player.rect.centerx - WIDTH // 2
-    ctx.camera_x = max(0, min(ctx.camera_x, LEVEL_END_X + 100 - WIDTH))
+    ctx.camera_x = max(0, min(ctx.camera_x, ctx.level_end_x + 100 - WIDTH))
 
     # --- Checkpoint ---
-    if not ctx.checkpoint_reached and ctx.player.rect.x >= LEVEL_END_X // 2:
+    if not ctx.checkpoint_reached and ctx.player.rect.x >= ctx.level_end_x // 2:
         ctx.checkpoint_reached = True
         ctx.checkpoint_x = ctx.player.rect.x
         ctx.score += int(ctx.balance.get("checkpoint_bonus", 120))
+        save_progress(ctx.progress)
 
     # --- Coin goal ---
     collected = ctx.coin_goal - len(ctx.coins)
@@ -483,7 +584,21 @@ def _render(ctx: "GameContext", screen: pygame.Surface, sounds) -> None:
         ctx.mom.draw(screen, cam)
     if ctx.boss:
         ctx.boss.draw(screen, cam)
+    for ball in ctx.soccer_balls:
+        ball.draw(screen, cam)
     ctx.player.draw(screen, cam)
+
+    # Speed lines when speed boost is active
+    if ctx.player.speed_boost > 0:
+        px = ctx.player.rect.x - cam
+        py = ctx.player.rect.centery
+        for i in range(5):
+            ly = py - 10 + i * 5
+            lx = px - 5 - random.randint(5, 25)
+            length = random.randint(10, 30)
+            alpha_color = (255, 255, 255)
+            pygame.draw.line(screen, alpha_color, (lx, ly), (lx - length, ly), 2)
+
     for particle in ctx.particles:
         particle.draw(screen, cam)
 
@@ -504,6 +619,27 @@ def _draw_background(ctx: "GameContext", screen: pygame.Surface) -> None:
             screen.fill((220, 225, 230))
         else:
             screen.fill((130, 205, 255))
+    elif ctx.biome_name == "ice":
+        screen.blit(build_gradient_surface((200, 220, 255), (240, 248, 255)), (0, 0))
+        # Snowflakes
+        for i in range(15):
+            sx = (i * 53 + int(ctx.level_timer * 20)) % WIDTH
+            sy = (i * 37 + int(ctx.level_timer * 30 + i * 7)) % HEIGHT
+            pygame.draw.circle(screen, WHITE, (sx, sy), 2)
+    elif ctx.biome_name == "lava":
+        screen.blit(build_gradient_surface((80, 20, 0), (200, 80, 20)), (0, 0))
+        # Draw rising lava
+        lava_screen_y = int(ctx.lava_y)
+        if lava_screen_y < HEIGHT:
+            pygame.draw.rect(screen, (220, 60, 10), (0, lava_screen_y, WIDTH, HEIGHT - lava_screen_y))
+            pygame.draw.rect(screen, (255, 120, 20), (0, lava_screen_y, WIDTH, 4))
+    elif ctx.biome_name == "underwater":
+        screen.blit(build_gradient_surface((10, 40, 80), (30, 100, 140)), (0, 0))
+        # Bubble particles
+        for i in range(10):
+            bx = (i * 80 + int(ctx.level_timer * 10 * (1 + i * 0.1))) % WIDTH
+            by = HEIGHT - int((ctx.level_timer * 40 + i * 60) % HEIGHT)
+            pygame.draw.circle(screen, (100, 180, 255), (bx, by), 3, 1)
     elif ctx.in_secret_world:
         t = ctx.cutscene_timer
         for y in range(HEIGHT):
@@ -569,15 +705,31 @@ def _draw_hud(ctx: "GameContext", screen: pygame.Surface) -> None:
         screen.blit(get_font(24).render('Find warp pipes to return!', True, YELLOW), (10, 90))
     elif ctx.current_level == 5:
         screen.blit(font.render('Level 5: BADMINTON COURT!', True, RED), (10, 50))
-        screen.blit(get_font(24).render('⚠️ Forced Badminton Class! ⚠️', True, (255, 100, 100)), (10, 85))
+        screen.blit(get_font(24).render('Forced Badminton Class!', True, (255, 100, 100)), (10, 85))
     else:
         screen.blit(font.render(f'Level: {ctx.current_level}', True, BLACK), (10, 50))
         if audio.current_music_type == "boss":
             screen.blit(get_font(28).render('♪ BOSS FIGHT ♪', True, RED), (10, 85))
 
-    # Lives
+    # Lives (heart icons)
     lives_y = 130 if ctx.in_secret_world else (115 if audio.current_music_type == "boss" else 90)
-    screen.blit(font.render(f'Lives: {ctx.player.lives}', True, BLACK), (10, lives_y))
+    screen.blit(get_font(24).render('Lives:', True, BLACK), (10, lives_y + 2))
+    max_display = 5
+    for i in range(max_display):
+        hx = 70 + i * 22
+        hy = lives_y + 4
+        if i < ctx.player.lives:
+            # Filled heart
+            pygame.draw.polygon(screen, RED, [
+                (hx + 8, hy + 4), (hx, hy), (hx + 2, hy - 3), (hx + 8, hy - 1),
+                (hx + 14, hy - 3), (hx + 16, hy), (hx + 8, hy + 8)])
+        else:
+            # Empty heart outline
+            pygame.draw.polygon(screen, (150, 150, 150), [
+                (hx + 8, hy + 4), (hx, hy), (hx + 2, hy - 3), (hx + 8, hy - 1),
+                (hx + 14, hy - 3), (hx + 16, hy), (hx + 8, hy + 8)], 1)
+    if ctx.player.lives > max_display:
+        screen.blit(get_font(20).render(f'+{ctx.player.lives - max_display}', True, RED), (70 + max_display * 22, lives_y + 2))
 
     # Switch parts
     parts_y = 160 if ctx.in_secret_world else (145 if audio.current_music_type == "boss" else 120)
@@ -627,8 +779,12 @@ def _draw_hud(ctx: "GameContext", screen: pygame.Surface) -> None:
         screen.blit(get_font(24).render(f'Speed Boost: {ctx.player.speed_timer // 60 + 1}s', True, GREEN), (10, ui_y))
     if ctx.player.jump_boost < 0:
         screen.blit(get_font(24).render(f'Jump Boost: {ctx.player.jump_timer // 60 + 1}s', True, BLUE), (10, ui_y + 20))
-    if ctx.player.is_immune():
+    if ctx.player.immunity_timer > 0:
         screen.blit(get_font(24).render(f'Immune: {ctx.player.immunity_timer // 60 + 1}s', True, YELLOW), (10, ui_y + 40))
+    if ctx.player.invincible:
+        screen.blit(get_font(24).render(f'★ INVINCIBLE: {ctx.player.invincible_timer // 60 + 1}s ★', True, GOLDEN), (10, ui_y + 60))
+    if ctx.player.has_projectile:
+        screen.blit(get_font(24).render('⚽ Soccer Ball Ready! (Jump+Down to fire)', True, WHITE), (10, ui_y + 80))
 
     # Coin objective
     obj_color = GREEN if ctx.coin_goal_done else BLACK
@@ -639,8 +795,21 @@ def _draw_hud(ctx: "GameContext", screen: pygame.Surface) -> None:
     if ctx.checkpoint_reached:
         screen.blit(get_font(24).render("Checkpoint Active", True, (0, 120, 0)), (10, ui_y + 80))
 
+    # Token milestone notification
+    if ctx.token_milestone_timer > 0:
+        ctx.token_milestone_timer -= 1
+        milestone_surf = get_font(36).render(f'🏆 {ctx.token_milestone_text}', True, GOLDEN)
+        screen.blit(milestone_surf, ((WIDTH - milestone_surf.get_width()) // 2, HEIGHT // 2 - 50))
+
     if ctx.boss:
         screen.blit(get_font(28).render(f'Boss Stage: {ctx.boss.stage}/3', True, RED), (10, ui_y + 70))
+
+    # Timer display (top-right area)
+    remaining = max(0, ctx.level_time_limit - ctx.level_timer)
+    timer_color = RED if remaining < 15 else BLACK
+    screen.blit(get_font(28).render(f'Time: {int(remaining)}s', True, timer_color), (WIDTH - 200, 90))
+    if ctx.time_bonus_earned:
+        screen.blit(get_font(20).render('⏱ TIME BONUS +500!', True, GOLDEN), (WIDTH - 200, 115))
 
     # Music controls hint (top-right)
     screen.blit(get_font(20).render('Music: +/- Volume, M Mute', True, BLACK), (WIDTH - 200, 10))
@@ -652,6 +821,10 @@ def _draw_hud(ctx: "GameContext", screen: pygame.Surface) -> None:
         True, BLACK,
     )
     screen.blit(access, (WIDTH - 330, 70))
+    # Difficulty preset label
+    preset = ctx.settings.get("difficulty_preset", "Normal")
+    preset_color = (100, 100, 100) if preset == "Normal" else (180, 80, 80) if preset == "Hard" else (80, 150, 80)
+    screen.blit(get_font(18).render(f'Difficulty: {preset}', True, preset_color), (WIDTH - 200, 135))
 
 
 def _draw_pause_overlay(ctx: "GameContext", screen: pygame.Surface) -> None:
